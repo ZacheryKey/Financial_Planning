@@ -1,0 +1,1264 @@
+##### Investment_Strategies Visualization #####
+
+# Goal:
+# to allow users to view the advantages and disadvantages of choosing certain stocks and investment strategies in order to
+# create an investment portfolio that matches their expectations. 
+#
+# Methods: 
+# create graphical and tabular visualizations to demostrate different investment strategies. Focus on dividend growth investments,
+# growth investments, value investing and others
+
+library(ggplot2)
+library(tidyverse)
+library(shiny)
+library(scales)
+library(riingo)
+library(lubridate)
+library(quantmod)
+library(data.table)
+library(dplyr)
+library(readr)
+library(quantmod)
+library(alphavantager)
+library(finreportr)
+
+setwd("C:/Users/YOUR_REPO_HERE")
+
+### ---------------------------------------- Dividend Growth Investments ---------------------------------------------###
+
+# CONSTANT SHARE PRICE, CONSTANT DIVIDEND GROWTH RATE, CONSTANT DRIP, LOW VOLATILITY, Price averaging investment function
+# given a number of years, the inflation rate, yearly income, percentage of income invested, the expected annual growth of a dividend, 
+# the expected annual yield of a dividend, the expected annual growth of the stock, and the current share price of the stock
+
+div_growth_invest <- function(years, current_income, retire_income, inflation_rate, pct_invested, growth_div, div_yield, growth_stock, crnt_stock_price, adjust_income){
+  
+  # Calculate your monthly income
+  monthly_income = current_income/12 
+  
+  # Amount in dollars, which we can invest monthly to achieve our retirement goals 
+  monthly_investment = monthly_income*pct_invested
+  months_away = 12*years
+  
+  # Calculate Growth and Returns #
+  crnt_stock_price_time = rep(crnt_stock_price,years)   # Current price of stock 
+  div_price_time = rep(div_yield*crnt_stock_price, years) # Current dividend price
+  monthly_investment_array = rep(monthly_investment, years) # Salary adjusted for inflation
+  
+  # Grow the share price tree AND dividend tree: p1 = initial dividend, p2 = p1*growth rate, p3 = p2*growth rate
+  for(k in 2:years){
+    crnt_stock_price_time[k] = crnt_stock_price_time[k-1]*growth_stock # Grow the share price at the share growth rate
+    div_price_time[k] = div_price_time[k-1]*growth_div                 # Grow the dividend at the div growth rate 
+    if(adjust_income){                                                 # Grow salary according to inflation if user specifies true
+      monthly_investment_array[k] = monthly_investment_array[k-1]*(inflation_rate+1)
+    } 
+  }
+  
+  # Place into a data frame 
+  stock_worth_df <- data.frame(seq(0,years-1,1),as.numeric(crnt_stock_price_time),as.numeric(div_price_time), as.numeric(monthly_investment_array))
+  colnames(stock_worth_df)<-c("Years","Share_Value","Dividends_Paid","Monthly_Investment")
+  
+  # Take each of the rows in the data frame and create 11 identical rows to represent each of the months 
+  stock_worth_df <- stock_worth_df[rep(seq_len(nrow(stock_worth_df)), each = 12), ]
+  stock_worth_df$Dividends_Paid<-stock_worth_df$Dividends_Paid/12 # Divide yearly dividends by 12 to get monthly payout
+  stock_worth_df$Months<-seq(0,months_away-1,1) # Add a column to display months 
+  
+  # Add a column of number of shares aquired assuming x% monthly income investment with reinvested dividends 
+  stock_worth_df$Shares <- rep(monthly_investment/crnt_stock_price, nrow(stock_worth_df))
+  
+  for(j in 2:nrow(stock_worth_df)){
+    stock_worth_df$Shares[j] = ((stock_worth_df$Monthly_Investment[j]/stock_worth_df$Share_Value[j])+stock_worth_df$Shares[j-1]) + ((stock_worth_df$Dividends_Paid[j-1]*stock_worth_df$Shares[j-1])/stock_worth_df$Share_Value[j])
+  }
+  
+  # Add a monthly income column 
+  stock_worth_df$monthly_income <- stock_worth_df$Dividends_Paid*stock_worth_df$Shares
+  
+  # Add a column to display the total value of the stock you have invested
+  stock_worth_df$investment_total_value <- stock_worth_df$Share_Value*stock_worth_df$Shares
+  
+  # Add a column for the retirement income goal that you have set out to make
+  for(i in 1:nrow(stock_worth_df)){
+    stock_worth_df$monthly_income_goal[i] = get_income_goal(stock_worth_df[i,which(colnames(stock_worth_df)=="Years")], retire_income, inflation_rate)
+  }
+  
+  stock_worth_df$income_invested[1] = stock_worth_df$Monthly_Investment[1]
+  # Add a column for no interest savings 
+  for(i in 2:nrow(stock_worth_df)){
+    stock_worth_df$income_invested[i] = stock_worth_df$Monthly_Investment[i] + stock_worth_df$income_invested[i-1]
+  }
+  
+  return(stock_worth_df)
+}
+
+# Use current monthly income and percent investment to get future monthly income goal in terms of present day dollars 
+get_income_goal <- function(years, retire_income, inflation_rate){
+  # Yearly cost of standard of living in future dollars 
+  Lifestyle_yearly_cost_future = present_value(retire_income, years, inflation_rate)
+  # Per month cost of current lifestyle in future dollars
+  Lifestyle_monthly_cost_future = Lifestyle_yearly_cost_future/12 # This is our goal to achieve in monthly dividends!!
+  return(Lifestyle_monthly_cost_future)
+}
+
+# Given a current income x, inflation rate r and number of years n, returns x in terms of dollars in n years
+present_value <- function(x,n,r){
+  return(x/((1-r)^n))
+}
+
+# Returns the number of years necessary to meet your retirement goals using the current model you have
+get_years <- function(div_model){
+  for(i in 1:nrow(div_model)){
+    if(div_model[i,which(colnames(div_model)=="monthly_income_goal")] < div_model[i,which(colnames(div_model)=="monthly_income")]){
+      break;
+    }
+  }
+  return(div_model[i,which(colnames(div_model)=="Years")])
+}
+
+# Now plot your monthly income dividend growth over time
+plot_divs <- function(div_growth_model1){
+  monthly_income_graph <- ggplot(data = div_growth_model1, mapping = aes(x = Years)) + geom_line(mapping = aes(y = monthly_income, color = "Income Generated"),size = 1) + geom_line(mapping = aes(y = monthly_income_goal, color = "Income Goal"),size = 1) + 
+    labs(title = "Dividends Paid Monthly",x = "Years from Initial Investment", y = "Monthly Income from dividends") +
+    scale_color_manual(name = "Legend", values = c("Income Generated" = "#0acc00", "Income Goal" = "#e63535")) + 
+    scale_x_continuous(limits = c(0, 50)) + 
+    scale_y_continuous(limits = c(0,20000), labels = comma)
+  return(monthly_income_graph)
+}
+
+# And plot your total investment value vs. dollars invested 
+plot_shares <- function(div_growth_model1){
+  total_investment_graph <- ggplot(data = div_growth_model1, mapping = aes(x = Years)) + geom_line(mapping = aes(y = investment_total_value, color = "Investment Value"), size = 1) + geom_line(mapping = aes(y = income_invested, color = "Income Invested"), size = 1)+
+    labs(title = "Total Portfolio Value",x = "Years from Initial Investment", y = "Total Amount invested") +
+    scale_color_manual(name = "Legend", values = c("Investment Value" = "#32A0A8", "Income Invested" = "#f22cb3")) + 
+    scale_x_continuous(limits = c(0, 50))+
+    scale_y_continuous(limits = c(0, 10000000), labels = comma)
+  return(total_investment_graph)
+}
+
+# Create your shiny app User inferface to allow user to play around with the different variables in dividend growth investing 
+ui<-fluidPage(
+    sidebarPanel(
+      titlePanel("Investment Planner"),
+        fluidRow(
+          column(6,
+            wellPanel(
+              h3("Welcome!"),
+              br(),
+              h4("Enter your financial information and retirement goals in the boxes to the right. This information will be used to simulate investment growth."),
+              br(),
+              h4("Select a tab at the top of the central panel to investigate a particular investment strategy.")
+            )         
+          ),
+          column(6,
+            wellPanel(
+              numericInput("current_income", h4("Yearly Income"), value = 50000, step = 1000, min = 0),
+              sliderInput("pct_invested", h4("Percent Income to Invest"), value = 20, step = 1, min = 0, max = 100),
+              sliderInput("retire_income", h4("Retirement Income Goal"), value = 25000, step = 1000, min = 0, max = 50000),
+              sliderInput("retire_age", h4("Years until Retirement"), value = 30, step = 1, min = 1, max = 50),
+              checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE)
+            )
+          )
+        )
+    ),
+    mainPanel(
+      tabsetPanel(type = "tabs",
+          tabPanel(title = "Dividend Growth Simulator", 
+              wellPanel(
+                  fluidRow(
+                      #wellPanel(
+                      #  fluidRow(
+                      #    h4("DIVIDEND GROWTH INVESTING SIMULATOR"),
+                      #    h5("Instructions: move stock stat sliders until goal for years until retirement and monthly earnings have been met.")
+                      #  )
+                      #),
+                      wellPanel(style = "background: #FFFFFF",
+                        fluidRow(
+                            column(6,
+                                  plotOutput("plot_div_invest", width = 575, height = 360),
+                                  br(),
+                                  br()
+                            ),
+                            column(6,
+                                  plotOutput("plot_total_shares", width = 575, height = 360),
+                                  br(),
+                                  br()
+                            ),
+                            column(12,
+                                  column(4,sliderInput("stock_growth",h4("Annual Stock Growth Rate (10 yr. avg)"), value = 0.04, min = 0, max = .2, step = .002)),
+                                  column(4,sliderInput("dividend_growth",h4("Annual Dividend Growth Rate (10 yr. avg)"), value = 0.03, min = 0, max = .1, step = .001)),
+                                  column(4,sliderInput("dividend_yield",h4("Annual Dividend Yield (10 yr. avg)"), value = 0.03, min = 0, max = .1, step = .001))
+                             ),
+                          ),
+                        ),
+                      wellPanel(
+                        fluidRow(
+                          splitLayout(
+                              htmlOutput("msg"),
+                              htmlOutput("portfolio_worth"),
+                              htmlOutput("dollars_invested"),
+                              htmlOutput("monthly_income_actual"),
+                              htmlOutput("yrs_until_retire")
+                          ),
+                          htmlOutput("msg2")
+                        )
+                      )
+                    )
+                  )
+              ),
+            tabPanel(title = "Stock Finder"),
+            tabPanel(title = "My Investments",
+                         wellPanel(h4("Record New Investments")),
+                         wellPanel(h4("Check Existing Investments")))
+    )
+  )
+)
+
+server<-function(input,output, session){
+  
+  observeEvent(input$current_income,{
+    x <- input$current_income
+    y <- input$retire_income
+    updateSliderInput(session = session, inputId = "retire_income", value = y, min = 0, max = x)
+  })
+  
+  generate_model <- reactive({
+    model <- div_growth_invest(50, input$current_income, input$retire_income, .025, (input$pct_invested/100), (1+input$dividend_growth), input$dividend_yield, (1+input$stock_growth), 15, input$increase_salary)
+    return(model)
+  })
+  
+  get_goal <- reactive({
+    return(as.character(round(get_income_goal(input$retire_age, input$retire_income, .025),0)))
+  })
+  
+  output$plot_div_invest <- renderPlot({
+    model <- generate_model()
+    plot_divs(model) + geom_vline(xintercept = input$retire_age, size = 1)
+  })
+  
+  output$plot_total_shares <- renderPlot({
+    model <- generate_model()
+    plot_shares(model) + geom_vline(xintercept = input$retire_age, size = 1)
+  })
+  
+  output$monthly_invest <- renderText({
+    data <- generate_model()
+    paste0(
+      " In order to meet your retirement income goal ",
+      as.character(input$retire_age),
+      " years from now, you will need at least ",
+      as.character(round(data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income_goal")],0)),
+      " dollars a month to achieve a yearly purchasing power equal to the ",
+      as.character(input$retire_income),
+      " in today's dollars."
+      )
+  })
+  
+  output$monthly_invest2 <- renderText({
+    data <- generate_model()
+    paste0(
+      "Your investment of ",
+      as.character(round((input$current_income/12)*(input$pct_invested/100),0)),
+      " dollars every month will yield ",
+      as.character(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0)),
+      " dollars a month in dividend payments in ",
+      as.character(input$retire_age),
+      " years."
+    )
+  })
+  
+  output$monthly_income_actual <- renderText({
+    data <- generate_model()
+    earnings <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0),big.mark = ",", scientific = F))
+    
+    if(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")] >= data[((input$retire_age*12)),which(colnames(data)=="monthly_income_goal")]){
+      paste0("<h1><b>","<font color=\"#40e32d\">", "$", earnings,"</b></h1></font>", "<h5><b>"," earnings / month","</b></h5>")
+    }else{
+      paste0("<h1><b>","<font color=\"#FF0000\">", "$", earnings,"</b></h1></font>", "<h5><b>"," earnings / month","</b></h5>")
+    }
+  })
+  
+  output$portfolio_worth <- renderText({
+    data <- generate_model()
+    worth <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="investment_total_value")],0), big.mark = ",", scientific = F))
+    paste0("<h1><b>","<font color=\"#40e32d\">", "$", worth,"</b></h1></font>", "<h5><b>"," net value of investments","</b></h5>")
+  })
+ 
+  output$dollars_invested <- renderText({
+    data <- generate_model()
+    invested <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="income_invested")],0), big.mark = ",", scientific = F))
+    paste0("<h1><b>","<font color=\"#40e32d\">", "$", invested,"</b></h1></font>", "<h5><b>"," dollars / invested","</b></h5>")
+  })
+  
+  output$yrs_until_retire <- renderText({
+    data <- generate_model()
+    years <- as.character(get_years(data))
+    if(years>=49){
+      years = paste0(">50")
+    }
+    
+    if(data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income")] >= data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income_goal")]){
+      paste0("<h1><b>","<font color=\"#40e32d\">", years,"</b></h1></font>", "<h5><b>"," yrs. to income goal","</b></h5>")
+    }else{
+      paste0("<h1><b>","<font color=\"#FF0000\">", years,"</b></h1></font>", "<h5><b>"," yrs. to income goal","</b></h5>")
+    }
+  })
+  
+  output$msg <- renderText({
+    paste("<h2><b>","  Investment", "<br>" ,"Outlook:","</b></h2>")
+  })
+  
+  output$msg2 <- renderText({
+    paste("<h5>"," *Calculations performed in terms of present day dollars, valuations calculated over a ", input$retire_age, " yr. period.","<br>",
+          "**Model Estimations assumes constant inflation rate of 2.5% annually with all numbers above calculated to predict value of investment at time of retirement year goal.","</h5>")
+  })
+  
+}
+
+
+# Launch the shiny application itself 
+shinyApp(ui = ui, server = server)
+
+
+### Dividend Stock Searcher ###
+# Purpose: to generate a viable list of all of the stocks and etfs that pay dividends. This list will then be created into a dataframe 
+# by searching for more information about the shares such as what their dividend yield is, what their dividend growth has been like (5yr, 10yr, 20yr),
+# how often they pay dividends, and the volatility of the stock as a whole. This information will be captured in a dataframe and filtered to meet the 
+# users demands based on their entries in the dividend investment model.
+# The different dividend stocks will be presented in a variety of comparitive and analytical manners, chiefly among which are 
+# stock and dividend growth over time (and number of years in which the stock has kept growing), volatility and stabilty score,
+# quadrant analysis of 
+
+# Access Tiingo API account 
+api_key <- "1cebbebc528db0995412994d0ea022a074f8fe71" 
+riingo_set_token(api_key)
+
+# Import all of the tickers in all of the markets that you care about
+all_tickers <- supported_tickers() 
+
+# Remove mutual funds, markets not using USD, and stocks/etfs that have an end date greater than 4 days prior to todays date
+tickers_info <- na.omit(test_tickers[-c(which(test_tickers$exchange %in% c("SHE","SHG")), which(test_tickers$priceCurrency %in% c("CNY")), which(test_tickers$assetType %in% c("Mutual Fund")), which(test_tickers$endDate < Sys.Date()-4)),])
+tickers <- tickers_info$ticker 
+
+## Now let us create a function to just return all of the stocks that currently pay dividends from a list stocks 
+get_div_stocks <- function(tickers){
+  
+  # Last item in the list to check 
+  end = as.numeric(length(tickers))
+  
+  # Get date information to collect recent dividends 
+  current_date = Sys.Date()
+  last_year_date = paste0(year(current_date)-1,"-",month(Sys.Date()),"-",day(Sys.Date()))
+  
+  # Create a character vector to append all of the dividend paying stocks to 
+  stocks_vec <- vector(mode = "character")
+  
+  # Try to get the stock info from yahoo finance. If you cannot (usually error HTTP 422) then move to next stock 
+  for (k in 1:end){ 
+    tryCatch(
+      expr = {
+        stock_name = tickers[k]
+        data_divs = getDividends(stock_name, from = last_year_date, to = current_date)
+        if(nrow(data_divs)!=0){
+          stocks_vec = append(stocks_vec, stock_name)
+        }
+      }
+      ,finally = message(paste0('Trying ticker no. ', k, " in list."))
+      
+      ,error = function(e){
+        closeAllConnections()
+      })
+    
+  }
+  return(stocks_vec)
+}
+
+# Get comprehensive list of all of the stocks that have paid dividends in the period (7/26/2019 - 7/26/2020)
+div_data1 <- get_div_stocks(tickers[1:1000])
+div_data2 <- get_div_stocks(tickers[1001:2000])
+div_data3 <- get_div_stocks(tickers[2001:3000])
+div_data4 <- get_div_stocks(tickers[3001:5000])
+div_data5 <- get_div_stocks(tickers[5001:8000])
+div_data6 <- get_div_stocks(tickers[8001:10000])
+div_data7 <- get_div_stocks(tickers[10001:14000])
+div_data8 <- get_div_stocks(tickers[14001:18000])
+div_data9 <- get_div_stocks(tickers[18000:21000])
+div_data10 <- get_div_stocks(tickers[21000:length(tickers)])
+
+# Combine into one character vector
+div_data <- c(div_data1,div_data2,div_data3,div_data4,div_data5,div_data6,div_data7,div_data8,div_data9,div_data10)
+
+# Create a csv file to store all of the tickers of the dividend paying stocks 
+write.csv(div_data, file = "current_dividend_tickers.csv")
+
+# Open the csv with all dividend stocks, name the cols and omit the first row and first col
+div_ticks <- data.frame(read_csv("current_dividend_tickers.csv", col_names = c("x","tickers"), skip = 1)[,2], stringsAsFactors = FALSE)
+
+# Get dividend yield and dividend growth avg for past 5 years 
+# Add past 5 years earnings per share and net sales to the dataframe 
+
+library(finreportr)
+library(lubridate)
+library(data.table)
+library(reshape2)
+library(dplyr)
+library(remotes)
+library(trqwe)
+library(stringdist)
+library(xlsx)
+library(XML)
+library(stringr)
+library(rvest)
+library(tidyverse)
+library(plyr)
+library(tibble)
+library(stringi)
+library(rlang)
+
+# @TODO 2: test net income algorithmn on data / remove dups in net_income algo
+# @TODO 3: create earnings per share algorithmn on data
+
+# Parse CIK number from sec website from HTML using rvest
+get_CIK <- function(ticker){
+  require(dplyr)
+  require(rvest)
+      # Get CIK number
+      url2 <- paste0("https://sec.report/Ticker/",tolower(as.character(ticker)))
+      cik <- read_html(url2) %>%
+              html_nodes(xpath = '/html/body/div/div/h2[1]') %>%
+              html_text
+      words <- strsplit(cik," ")[[1]]
+  return(as.numeric(words[3]))
+}
+
+# Parse company name from sec website from HTML using rvest 
+get_company_name <- function(ticker){
+  require(dplyr)
+  require(rvest)
+    # Get company names
+    url2 <- paste0("https://sec.report/Ticker/",tolower(as.character(ticker)))
+    comp_name <- read_html(url2) %>%
+      html_nodes(xpath = '/html/body/div/div/h1') %>%
+      html_text
+    words <- strsplit(comp_name, " ")[[1]]
+  return(paste(words[-c(1,2)], collapse = ' '))
+}
+
+# Get a list of dataframes with tickers, categorical variabes and example values. 
+# This function serves the purpose of getting an example of every format variables on 
+# income sheets may take. Takes in as parameters whether or 
+# not you want to evaluate foreign tickers and the first n tickers in the list you 
+# want to evaluate. If left empty, n will default to all of the tickers.
+get_fin_list <- function(year = 2015, foreign_bool = FALSE, tickers_list){
+  require(data.table)
+  require(finreportr)
+  require(xlsx)
+  require(stringdist)
+  require(lubridate)
+  
+  prev_years <- seq(year, year-4, -1)
+  l <- list()
+  
+  for(i in 1:length(tickers_list)){
+    # Get tickers from the ticker to cik list 
+    ticker = tolower(as.character(tickers_list[i]))
+    n <- as.numeric(length(tickers_list))
+    message(paste0("Evaluating no.",i, " out of ", n, " tickers."))
+    
+    # Attempt to get the financial information from the tickers 
+    tryCatch(
+      expr = {
+        # Get the company name scraped off of sec website
+        name_comp = get_company_name(ticker)
+        
+        # Get the report number and the filing number to form URL to get data
+        repo <- AnnualReports(ticker, foreign = foreign_bool)
+        idx = which(as.numeric(year(repo$filing.date)) == year)
+        filling_no <- repo$accession.no[idx] %>% str_remove_all("-")
+        CIK_NO <- get_CIK(ticker)
+        
+        # Download the data and save to computer after trying URL
+        url_b <- paste0("https://www.sec.gov/Archives/edgar/data/",CIK_NO,"/",filling_no,"/Financial_Report.xlsx")
+        destfile <- "C:/Users/Zachery Key/Desktop/Financial_Project/output.xlsx"
+        download.file(url_b, destfile, mode = "wb")
+        
+        # Get the workbook sheet idx with name closest to that which appears in the target 
+        names_sheets <- loadWorkbook(destfile) %>% getSheets() %>% names()
+        names_sheets
+        
+        # Target represents the docs you want, x target are the documents you explicitly do not want
+        target <- c("consolidated statements of oper","consolidated statements of earn", "consolidated statements of inc", 
+                    "consolidated statements of earnings","consolidated statements of income","consolidated statements of operations",
+                    "statement of consolidated operations","statements of income", "consolidated income statements",
+                    "consolidated_statements_of_ope","consolidated_statements_of_inc","consolidated_statements_of_ear",
+                    "consolidated and combined state","condensed_consolidated_stateme","consolidated_income_statement",
+                    "consolidated_and_combined_stat")
+        
+        # If any of the following appear exactly as below, delete them from the matrix because we dont want these statements 
+        x_target <- c("consolidated_statements_of_cas","consolidated statements of cash","consolidated_statement_of_cash",
+                      "consolidated_statement_of_comp","consolidated_statements_of_cha")
+        x_matrix <- stringdistmatrix(tolower(names_sheets), x_target, useNames = TRUE)
+        x_idx = unique(which(x_matrix <= 1, arr.ind = TRUE)[,1])
+        
+        # Set up a matrix to evaluate the difference between the actual sheetnames and the target sheetnames.
+        # Choose the one of minimal difference. Remove all of the items you do not want to have as possible 
+        # sheetnames from the matrix. 
+        matrix <- stringdistmatrix(tolower(names_sheets), target, useNames = TRUE)
+        if(length(na.omit(x_idx)) > 0){
+          matrix <- matrix[-(na.omit(x_idx)),]
+        }
+        sheet_name <- rownames(which(matrix == min(matrix), arr.ind = TRUE))[1]
+        sheet_num <- which(tolower(names_sheets) == sheet_name)
+        
+        # Open and store data in R dataframe
+        info <- read.xlsx(destfile, sheetIndex = sheet_num, as.data.frame = TRUE)
+        
+        # Get the units and type of information of the sheet: 
+        units1 <- colnames(info)[1]
+        units2 <- info[1,1]
+        
+        # Include Appropriate columns in info.
+        # We want to get all of the cols with about the same number of NAs (no more than 1/3 occupancy of col)
+        # and greater idx than the col with the label 'X12 months ended' or 'X11 months ended' 
+        n = which(colnames(info) %in% c("X11.Months.Ended","X12.Months.Ended"))[1]
+        nas_info = as.numeric(apply(info, 2, function(x){sum(is.na(x))}))[n:ncol(info)]
+        vec_diff = nas_info - nas_info[1]
+        idxs =  which( vec_diff < (1*nrow(info)/3) ) + n - 1
+        
+        if(n %in% idxs){
+          info <- info[,c(1,idxs)]
+        }else{
+          info <- info[,c(1,n,idxs)]
+        }
+        
+        # Store the ticker, the data and the units the data is held in/type of form being evaluated
+        income_state2 <- data.frame(ticker, name_comp, info, units1, units2)
+        
+        # Store into list 
+        l[[i]] <- income_state2
+        
+        # Print out success message
+        message(paste0(ticker,": success!"))
+      },
+      error = function(e){
+        closeAllConnections()
+        # Print out failure message 
+        message(paste0(ticker,": invalid ticker, year or foreign logical"))
+      }
+    )
+    closeAllConnections()
+  }
+  
+  return(l)
+} 
+
+# Create a function to iterate through your ex_format dataframe ticker by ticker and have the user enter the 
+# rownumber of the row that best meets the metric they are lookng to capture upon input
+set_metrics <- function(metric, data_source){
+  require(trqwe)
+  metric_aliases <- vector(mode = "character")
+  n = length(unique(data_source$ticker))
+  for(i in 1:n){
+    # Get all of the rows with the same ticker and print them out
+    tick = unique(data_source$ticker)[i]
+    data = ex_forma_full
+    subset <- data.frame(data_source[which(data_source$ticker==tick),], 1:nrow(data_source[which(data_source$ticker == tick),])) %>% 
+            set_colnames(c("ticker","name","metric","col1","col2","col3","units1","units2","row_no"))
+    print(subset[,c(1,3,9)])
+    message(paste0("printing ",i," of ",n," unique tickers"))
+    
+    # Collect the user input number row matching the metric you are looking for 
+    line_no <- as.numeric(readline(prompt = paste0("Enter number of metric best matching ", metric, ": ", 
+                                                 '\n',"(enter nothing to exit program)", '\n',
+                                                  "(enter 0 to skip current ticker)")))
+  
+    # Select and store all of the aliases for the metric into a character vector
+    if(!is.na(line_no) & line_no > 0){
+      metric_aliases[i] <- subset[which(subset$row_no==line_no), which(colnames(subset)=="metric")]
+    }else if(!is.na(line_no) & line_no <= 0){
+      next
+    }else{
+      break
+    }
+    closeAllConnections()
+  }
+  return(metric_aliases)
+}
+
+# Take in a data.frame with eight cols (ticker, company_name, metric, y1, y2, y3, unit1, unit2) and selects which 
+# rows best correspond to net_income metric. This function will always return a best guess
+get_net_income <- function(data_source, tick){
+
+  # Set up a list of all of the possible aliases for net income
+  net_inc_alts <-c("net income","net loss income","net income (loss)","net earnings","net earnings (loss)","net income attributable to common stockholders",
+                   "net income attributable to the stockholders of","net income attributable to","net income attributable to common shareholders",
+                   "net income attributable to shareholders", "net earnings including noncontrolling interests")
+  # Get the subset of the data for all rows with the same ticker, calc closest resemblance to a string in net_inc_alias, get the index of the row
+  subset1 <- data_source[which(data_source$ticker==tick),]
+  mat <- stringdistmatrix(na.omit(tolower(subset1$metric)), net_inc_alts, useNames = TRUE)
+  idx <- which(mat == min(mat), arr.ind = TRUE)[1]
+  
+  # Get the name of the metric as appears in the actual dataframe. Append new metric name and return 
+  namer <- rownames(mat)[idx]
+  dat <- data.frame(subset1[which(tolower(subset1$metric)==namer)[1],])
+  dat$metric <- "net_income"
+  return(dat[,which(colnames(dat) %in% c("ticker","name","metric","y1","y2","y3","units1","units2"))])
+}
+
+
+# Move through parse_metrics_list and count the score each row gets for eps. This function will only return a best guess if there is a row 
+# in the data frame that meets the criteria
+get_eps <- function(data_source, tick){
+  
+  # Constants used to compare rows for eps data
+  hits_eps <- c("share","per","basic","earnings","dollars","net","common","income","total","dividends","dividend")
+  weights_hits_eps <- c(7,6,9,8,3,2,4,1,5,-20,-20)
+  eps_words_weights <- data.frame(as.character(hits_eps),weights_hits_eps)
+  
+  # Subset the datasource to only have a single ticker, remove na vals and create a list of lists of metric data
+  subset1 <- data_source[which(data_source$ticker==tick),]
+  subset <- subset1[which(!(is.na(subset1$y1) & is.na(subset1$y2) & is.na(subset1$y3))),]
+  parse_metrics <- tolower(subset$metric) %>% str_replace_all("[^0-9A-Za-z///' ]","") %>% strsplit(split = ' ')
+  weights_score <- vector()
+  
+  # Iterate through the list of metric info and calculate the sum of weighted words in each row. Add to a vector 
+  for(i in 1:length(parse_metrics)){
+    ex_line <- parse_metrics[[i]]
+    score <- sum(eps_words_weights[which(as.character(eps_words_weights[,1]) %in% ex_line),2])
+    weights_score <- append(weights_score, score)
+  }
+  weights_score
+  # Add a eps likelihood col to the dataframe 
+  subset$eps_score = weights_score
+  
+  # Ok now that we have the scores corresponding to each row in subset, lets further narrow down the candidates by checking to see which of the 
+  # weights score has a lower then 100 value for y1/y2/y3. Now take the max value  of eps_score from here and that is your row!
+  order_subset <- subset[which(rowMeans(abs(data.frame(as.numeric(subset$y1),as.numeric(subset$y2),as.numeric(subset$y3))), na.rm = TRUE) < 200), ]
+  order_subset$metric <- "eps"
+  return(order_subset[which.max(order_subset$eps_score), which(colnames(order_subset) %in% c("ticker","name","metric","y1","y2","y3","units1","units2"))])
+}
+
+# Takes the units from units col 1 and units col 2. Parses the share and stock multipliers and returns 
+# a vector with two strings: one of stock multiplier and the other of share multiplier IN THAT ORDER. 
+parse_units <- function(units1, units2){
+  
+  # Parse both units 1 and units 2 for unit multiplier
+  unit_m <- c(parse_units2(units2)[1], parse_units1(units1)[1])
+  unit_multiplier <- unit_m[!is.na(unit_m)][1]
+  
+  # Parse both units 1 and units 2 for share multiplier 
+  shar_m <- c(parse_units2(units2)[2], parse_units1(units1)[2])
+  shar_multiplier <- shar_m[!is.na(shar_m)][1]
+  
+  return(c(unit_multiplier,shar_multiplier))
+}
+
+parse_units1 <- function(units1){
+  # Split on '.' char, lowercase all letters and remove all words up to and including USD
+  ex_split1 <- stri_remove_empty(strsplit(tolower(units1), split = '\\.')[[1]])
+  ex_split1 <- ex_split1[-(1:which(ex_split1=="usd"))]
+  
+  share1_id = which(ex_split1 %in% c("shares","share"))[1]
+  idxs1 = which(ex_split1 %in% key_multiplier_phrases)
+  
+  # if the word shares is present and multiple key_multipliers appear after it, then the closest idx to shares 
+  # is the shr_multipler and the farthest is the val_multiplier. If share does not appear, and there is only one
+  # key mutiplier, then that is the val_multiplier. If there is nothing after usd, no data is available in that col
+  
+  if(!is.na(share1_id)){
+    shr_multiplier1 <- ex_split1[idxs1[which.min(abs(share1_id - idxs1))]]
+    val_multipler1 <- ex_split1[idxs1[which.max(abs(share1_id-idxs1))]]
+  }else if(is_empty(ex_split1)){
+    shr_multiplier1 <- NA
+    val_multipler1 <- NA
+  }else if(is.na(share1_id) & !is_empty(ex_split1)){
+    shr_multiplier1 <- NA
+    val_multipler1 <- ex_split1[idxs1]
+  }
+  return(c(val_multipler1,shr_multiplier1))
+}
+
+parse_units2 <- function(units2){
+  # Remove punctuation, split string on white space into character array  
+  ex_split <- strsplit(str_replace_all(tolower(units2), "[[:punct:]]", ""), split = ' ')[[1]]
+  
+  # Set up the key words we are looking for in the units2 col
+  key_multiplier_phrases <- c("thousands", "millions")
+  key_share_phrases <- c("shares","share")
+  
+  # Find the indices of the key words we are looking for in the character arra5
+  except_id = which(ex_split == "except")
+  share_id = which(ex_split == "share")
+  first_in_id = which(ex_split == "in")[1]
+  sec_in_id = which(ex_split == "in")[2]
+  idxs = which(ex_split %in% key_multiplier_phrases)
+  words_idxs = ex_split[idxs]
+  
+  # Get the overall unit multiplier. If it is to the right of the first 'in' and before the word except AND share then it is good
+  val_multipler = words_idxs[which(idxs < except_id & idxs < share_id & idxs > first_in_id)]
+  if(is_empty(val_multipler)){
+    val_multipler = NA
+  }
+  
+  # Get the share multiplier
+  shr_multiplier = words_idxs[which(idxs > except_id & idxs > share_id & idxs > sec_in_id)]
+  if(is_empty(shr_multiplier)){
+    shr_multiplier = NA
+  }
+  return(c(val_multipler, shr_multiplier))
+}
+
+# Function to return all valid entries from a financial data_frame
+combine_data_list<-function(data){
+  # Get the dimension of the data in terms of number of columns 
+  data_dim <- as.numeric(lapply(data, function(x){ncol(data.frame(x))}))
+  # Get all of the data with 7 or 8 cols 
+  data_forma_full <- data[which(data_dim==8)] %>% rbindlist() %>% data.frame() %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+  data_forma_partial <- data[which(data_dim==7)] %>% rbindlist() %>% data.frame() %>% add_column(NA, .after = 5) %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+  # Combine and return as dataframe
+  return(rbind(data_forma_full, data_forma_partial))
+}
+
+# # Write Div_ticks to csv. Write 
+# write.csv(div_ticks, "C:\\Users\\Zachery Key\\Desktop\\Financial_Project\\div_ticks.csv")
+# 
+# # Get a list with the first 1000 domestic stocks financial info 3 years prior to 2015
+# ex_format_data1 <- get_fin_list(2015, FALSE, tickers_list = div_ticks$tickers[1:1000]) %>% combine_data_list()
+# write.csv(ex_format_data1, "C:\\Users\\Zachery Key\\Desktop\\Financial_Project\\first_1000_stock_data.csv")
+# 
+# # Get next 1000 tickers (188 total non null entries)
+# ex_format_data2 <- get_fin_list(2015, FALSE, tickers_list = div_ticks$tickers[1001:2000]) %>% combine_data_list()
+# write.csv(ex_format_data2, "C:\\Users\\Zachery Key\\Desktop\\Financial_Project\\second_1000_stock_data.csv")
+
+ex_format_data3 <- get_fin_list(2015, FALSE, tickers_list = div_ticks$tickers[2001:3000]) %>% combine_data_list()
+write.csv(ex_format_data3, "C:\\Users\\Zachery Key\\Desktop\\Financial_Project\\third_1000_stock_data.csv")
+
+
+# Load all past work into R workspace 
+first_1000_stocks <- read.csv('first_1000_stock_data.csv')
+second_1000_stocks <- read.csv('second_1000_stock_data.csv')
+third_1000_stocks <- read.csv('third_1000_stock_data.csv')
+div_ticks <- read.csv('div_ticks.csv')
+
+# The best guess for eps per our algorithmn 
+get_net_income(first_1000_stocks, 'cci')
+
+# The best guess for eps per our algorithmn with weighted values for eps_words 
+get_eps(first_1000_stocks, 'cci')
+
+# Loop through all of ex_forma_full and check to see if our algorithmns are working. TryCatch the eps and net_income in the event that they are 
+# not available 
+storage_list <- list()
+for(i in 1:length(unique(first_1000_stocks$ticker))){
+  flag <- TRUE
+  tick = unique(first_1000_stocks$ticker)[i]
+  tryCatch(
+    # Attempt to set up an expression to get the eps and the net income. If it doesn't work, just get the net income
+    expr = {
+      eps_getter = data.frame(get_eps(first_1000_stocks, as.character(tick)))
+      net_getter = data.frame(get_net_income(first_1000_stocks, as.character(tick)))
+      storage_list[[i]] <- data.frame(rbind(eps_getter, net_getter))
+      }
+   ,error = function(e){
+     flag <<- FALSE
+    }
+  )
+  if(!flag){
+    print(i)
+    net_getter = data.frame(get_net_income(first_1000_stocks, as.character(tick)))
+    storage_list[[i]] <- data.frame(net_getter)
+  }
+}
+
+# Bind and place all the information on eps and net income into a data frame. 
+eps_and_net <- rbindlist(storage_list)
+
+
+# Need to check out what the deal is with these
+'apog'
+'ato'
+'cato'
+
+
+### --------------------------------- Depricated Code -------------------------------- ###
+
+### TRYCATCH EXAMPLE 1.) Try until sucessful!! ###
+# for (i in 1:10){ 
+#   flag <- TRUE
+#   tryCatch(
+#     # Step 1. Here is where you put the thing you are trying to do that may cause errors 
+#     expr = {
+#       #print(2*i)              # When uncommented, will not result in an error, thus cutting the loop short 
+#       #print(2*last_year_date) # When uncommented, Will result in an error, thus continuing the loop
+#     }
+#     
+#     # Step 2. Here is where you put the thing to be done regardless of presence of errors 
+#     ,finally = print(paste0('Trying ticker no. ', i))
+#     
+#     # Step 3. Here is where you handle errors that may occur in step 1. of trycatch. 
+#     # In this example, if there has been an error then update flag to be false. This will allow you to 
+#     # continue looping. The double arrow <<- is used to modify a variable in a higher scope than the current
+#     # expression. (AKA outside the tryCatch function)
+#     ,error = function(e){flag <<- FALSE})
+#   
+#   # If there has been an error, try step 1 again, print out a message confirming failure
+#   if(flag == FALSE){
+#     print(paste("Failed attempt on ticker no.", i))
+#     next
+#     # Break the loop on the first successful attempt of step 1, and print out a message confirming success
+#   }else{
+#     print("Succesful!")
+#     break
+#   }
+# }
+
+
+# Function to return a dataframe of all of the stocks that pay dividends from the 
+# list of stocks passed in as a parameter using yahoo finance api. Checks to see if the stocks 
+# listed are valid AND have dividends, with information displayed as warning messages. 
+# get_crnt_divs<-function(tickers){
+#   
+#   # Last item in the list to check 
+#   end = as.numeric(length(tickers))
+#   
+#   # Get date information to collect recent dividends 
+#   current_date = Sys.Date()
+#   last_year_date = paste0(year(current_date)-1,"-",month(Sys.Date()),"-",day(Sys.Date()))
+#   
+#   # Set initial dividend information 
+#   for (k in 1:end){ 
+#     flag <- TRUE
+#     tryCatch(
+#       # Step 1. Here is where you put the thing you are trying to do that may cause errors 
+#       expr = {
+#         stock_name = tickers[k]
+#         data_divs = data.frame(getDividends(stock_name, from = last_year_date, to = current_date))
+#         data_divs$date <- date(rownames(data_divs))
+#         data_divs$ticker <- as.character(tickers[k])
+#         colnames(data_divs)<-c("vals","date","tickers")
+#       }
+#       
+#       # Step 2. Here is where you put the thing to be done regardless of presence of errors 
+#       ,finally = message(paste0('Trying ticker no. ', k, " in list."))
+#       
+#       # Step 3. Here is where you handle errors that may occur in step 1. of trycatch. 
+#       # In this example, if there has been an error then update flag to be false. This will allow you to 
+#       # continue looping. The double arrow <<- is used to modify a variable in a higher scope than the current
+#       # expression. (AKA outside the tryCatch function)
+#       ,error = function(e){
+#         flag <<- FALSE
+#         closeAllConnections()
+#       })
+#     
+#     # If there has been an error, try step 1 again, print out a message confirming failure
+#     if(!flag){
+#       message(paste0("Failed attempt on ticker ", tickers[k],"."))
+#       next
+#       # Break the loop on the first successful attempt of step 1, and print out a message confirming success
+#     }else{
+#       message("Success!")
+#       cat('\n')
+#       break
+#     }
+#   }
+#   
+#   # Get all of the rest of the dividends appended to dataframe IF they have paid dividends in the last year 
+#   for(i in k:end){
+#     tryCatch({
+#       stock_name = tickers[i]
+#       divs1 = data.frame(getDividends(stock_name, from = last_year_date, to = current_date))
+#       #message("* Valid ticker: ", tickers[i])
+#       
+#       if(nrow(divs1)!=0){
+#         data_divs1 = data.frame(divs1[,1], date(row.names(divs1)), stock_name)
+#         colnames(data_divs1) <- c("vals","date","tickers")
+#         data_divs<-rbind(data_divs,data_divs1)
+#         message(tickers[i], " has paid dividends in past 12 months.")
+#         cat('\n')
+#       }else{
+#         # message("* ",tickers[i]," has no recorded dividends for past 12 months.")
+#       }
+#     },
+#     error = function(e){
+#       closeAllConnections()
+#       # message("* Warning! Invalid ticker: ", tickers[i])
+#     })
+#     
+#     #print(paste0("Evaluating ticker no. ",i,". of ",end))
+#     
+#   }
+#   closeAllConnections()
+#   return(data_divs)
+# }
+
+# # Income of 40K, planning for retirement income of 30K, invest 30% monthly for x years, inflation of 3%, 
+# # dividend growth of 1.6%, dividend yield of 3.5%, stock growth of 4%, stock price of 46.31. 
+# # 26 years to save enough to live on dividends. 
+# 
+# # Set up global variables used to determine an individuals investing goals 
+# 
+# # Set the user - defined variables 
+# Current_income = 50000     # Current Income
+# Future_income = 25000      # Minimum Retirement Income you are comfortable living on, in todays dollars. 
+# years_away = 50            # Years until retirement
+# investment_pct = .2        # User selected percentage of income to invest
+# 
+# # Set the stock and economy - defined variables 
+# inflation_rate = .025         # Predicted rate of inflation (actually closer to 2.5% but we rounded up for safety)
+# dividend_growth_rate = 1.03   # Rate at which the dividend will grow over time 
+# stock_growth_rate = 1.05      # Rate at which stock grows over time
+# dividend_yield = .03          # Percentage of share each dividend payout will be worth
+# share_price = 15.00           # Present Day Value of one single share 
+# 
+# # Project Future earnings from dividend investments (in current US dollars)
+# # years, current income income, pct_invested, inflation_rate, growth_div, div_yield, growth_stock, crnt_stock_price
+# div_growth_model1 <- div_growth_invest(years_away, Current_income, Future_income, inflation_rate,investment_pct, dividend_growth_rate, dividend_yield, stock_growth_rate, share_price, FALSE)
+# div_growth_model2 <- div_growth_invest(years_away, Current_income, Future_income, inflation_rate,investment_pct, dividend_growth_rate, dividend_yield, stock_growth_rate, share_price, TRUE)
+# 
+# # Get the year at which you have achieved your minimum retirement income 
+# reached_goal_year <- get_years(div_growth_model1)
+# 
+# # Get the actual projected income for retirement AND the goal for retirement for comparison 
+# print(div_growth_model1[nrow(div_growth_model1),which(colnames(div_growth_model1)=="monthly_income")])
+# print(get_income_goal(years_away, Future_income, inflation_rate))
+# print(get_years(20, 40000, 30000, .3, .025, 1.016, .035, 1.04, 46.00))
+
+# library(alphavantager)
+# library(Quandl)
+# library(riingo)
+# 
+# # Access Tiingo API account 
+# tiingo_api_key <- "1cebbebc528db0995412994d0ea022a074f8fe71" #Tiingo API key
+# av_api_key("C3X342P84O5D2QGN")      #Alphavantage API key 
+# q_api_key <- "N-Yrjym9xQS8iGyHZyx9" #QUandl API key 
+# av_get(symbol = "AAPL", av_fun = "OVERVIEW")
+# 
+# start_date <- paste0(year(current_date)-3,"-",'01','-','01')
+# 
+# # TIINGO (pay to get more stocks, currently limited to DJIA 30 stocks)
+# riingo_set_token(api_key)
+# data_available<-riingo_fundamentals_definitions()
+# data_me <- riingo_fundamentals_statements("APPL", start_date = start_date, end_date = Sys.Date())
+
+# # QUANDL: (pay to get more stocks, very basic info only here)
+# Quandl.api_key(q_api_key)
+# tickers_select = c('AAPL','JPM')
+# data <- Quandl.datatable("SHARADAR/SF1", 
+#                          calendardate.gte = start_date, 
+#                          ticker = tickers_select, 
+#                          qopts.columns=c('ticker', 'calendardate', 'netinc', 'divyield', 'ncfdiv', 'eps', 'pe', 'revenue'))
+
+# SEC: Gets income statements from company from past three years successfully BUT... takes forever 
+
+# library(stringdist)
+# library(finreportr)
+# a <- GetIncome("AAPL", year)
+# b <- GetIncome("TSLA", year)
+# c <- GetIncome("A",year)
+# d <- GetIncome("XOM",year)
+# 
+# data = d
+#
+#        which(!grepl("diluted",tolower(data$Metric)) & stringdist("earnings per share, basic",tolower(data$Metric)) < 16 & date(data$endDate) - date(data$startDate)>300)),
+#                        -c(which(colnames(data) %in% c("Units","startDate")))],ticker_name) %>% 
+#   set_colnames(c("Metric","Amount","Date","Ticker")) %>%  
+#   melt(c("Ticker","Date","Metric"),"Amount") %data = d
+# ticker_name = "XOM"
+# year = 2015
+# 
+# dat <- data.frame(data[c(which((stringdist("weighted average number of shares outstanding, basic",tolower(data$Metric)) < 20) & (!grepl("diluted",tolower(data$Metric))),date(data$endDate) - date(data$startDate)>300),
+#                   >% 
+#   dcast(Ticker + Date ~ Metric) %>% 
+#   set_colnames(c("ticker","date","eps","num_shares"))
+
+#
+# # RUN ONLY ONCE: Get conversion list of all of the SEC codes for tickers with CIK encoding 
+# tick_to_CIK <- data.frame(read.table(url("https://www.sec.gov/include/ticker.txt"))) %>% set_colnames(c("ticker","cik"))
+# write.csv(tick_to_CIK, file = "cik_2_tick.csv")
+# 
+# # User set variables of ticker and whether or not it is a foreign stock
+# ticker = "aa"
+# foreign_bool = FALSE
+# year = 2020
+# prev_years <- seq(year-2, year-4, -1)
+# 
+# # Get the report number and the filing number to form URL to get data
+# repo <- AnnualReports(ticker, foreign = foreign_bool)
+# filling_no <- repo$accession.no[2] %>% str_remove_all("-")
+# CIK_NO <- tick_to_CIK[which(tick_to_CIK$ticker==ticker),2]
+# 
+# # Download the data and save to computer
+# url_b <- paste0("https://www.sec.gov/Archives/edgar/data/",CIK_NO,"/",filling_no,"/Financial_Report.xlsx")
+# destfile <- "C:/Users/Zachery Key/Desktop/Financial_Project/output.xlsx"
+# download.file(url_b, destfile, mode = "wb")
+# 
+# # Open and store data in R dataframe
+# info <- data.frame(read.xlsx(destfile, sheetIndex = 2))
+# 
+# y3 = which(grepl(as.character(prev_years[1]),as.character(info[1,])))
+# y2 = which(grepl(as.character(prev_years[2]),as.character(info[1,])))
+# y1 = which(grepl(as.character(prev_years[3]),as.character(info[1,])))
+# 
+# # Transform data to desired format by transposing cols and rows 
+# info <- na.omit(info[,c(1,y1,y2,y3)])
+# 
+# # Find the closest possible match to the know aliases for EPS, net income and no of shares in the first column of the info df  
+# eps_row = stringdistmatrix(c("earnings per common share (dollars)",
+#                              "basic (in dollars per share)",
+#                              "Net income per share - basic",
+#                              "basic"),
+#                            tolower(info[,1]))
+# 
+# shr_row = stringdistmatrix(c("number of shares outstanding",
+#                              "basic (in shares)"),
+#                            tolower(info[,1]))
+# 
+# inc_row = stringdistmatrix(c("net income attributtable to parent",
+#                              "net income (loss) attributable to",
+#                              "net income"),
+#                            tolower(info[,1]))
+# 
+# # Row numbers for the most likely candidates for eps, net income and number of shares outstanding 
+# ids <- c(which(eps_row == min(eps_row), arr.ind = TRUE)[2],
+#          which(shr_row == min(shr_row), arr.ind = TRUE)[2],
+#          which(inc_row == min(inc_row), arr.ind = TRUE)[2]
+# )
+# 
+# # Combine the rows of data that you are 
+# info[ids,]
+
+# 
+# d <- GetIncome("XOM",year)
+# ticker_name = "XOM"
+# year = 2015
+# 
+# dat <- data.frame(data[c(which((stringdist("weighted average number of shares outstanding, basic",tolower(data$Metric)) < 20) & (!grepl("diluted",tolower(data$Metric))),date(data$endDate) - date(data$startDate)>300),
+#                          which(!grepl("diluted",tolower(data$Metric)) & stringdist("earnings per share, basic",tolower(data$Metric)) < 16 & date(data$endDate) - date(data$startDate)>300)),
+#                        -c(which(colnames(data) %in% c("Units","startDate")))],ticker_name) %>%
+#   set_colnames(c("Metric","Amount","Date","Ticker")) #%>%
+# #melt(c("Ticker","Date","Metric"),"Amount") %>%
+# #dcast(Ticker + Date ~ Metric) %>%
+# #set_colnames(c("ticker","date","eps","num_shares"))
+# 
+# 
+# #   set_colnames(c("ticker","date","eps","num_shares"))
+
+# # SEC Data using our own coding and a bit of finreportR
+# a <- GetIncome("AAPL", year)
+# b <- GetIncome("TSLA", year)
+# c <- GetIncome("A",year)
+# d <- GetIncome("XOM",year)
+# 
+# data = d
+# ticker_name = "XOM"
+# year = 2015
+# 
+# # Row ids
+# nshares <- stringdist(c("weighted average number of shares outstanding, basic",
+#                         "number of shares outstanding"),
+#                       tolower(data[,1]))
+# 
+# eps <- stringdist(c("earnings per share, basic",
+#                     "earnings per common share (dollars)"),
+#                   tolower(data[,1]))
+# 
+# rev <- stringdist(c("net income for the year",
+#                     "net income"),
+#                   tolower(data[,1]))
+# 
+# x_dilu <- !grepl("diluted",tolower(data$Metric))
+# x_qtrs <- date(data$endDate) - date(data$startDate) > 300
+# 
+# # Column ids
+# x_cols <- colnames(data) %in% c("Units","startDate")
+# 
+# # format data  
+# #set_colnames(c("Metric","Amount","Date","Ticker")) %>%
+# #melt(c("Ticker","Date","Metric"),"Amount") %>%
+# #dcast(Ticker + Date ~ Metric)
+# 
+# data
+
+# library(GetEdgarData)
+# 
+# # One way to do this for free is to manually download and subset data from the SEC. 
+# # However, like most government work, you have to cut through miles of red tape and 
+# # it takes FOREVER to do.
+# my_year = 2018
+# type_form = '10-K'
+# 
+# df_info <- get_info_companies(years = my_year, 
+#                               type_data = 'yearly', 
+#                               type_form = type_form, 
+#                               cache_folder = 'C:/Users/Zachery Key/Desktop/Financial_Project/cache'
+# )
+# 
+# my_company <- 'APPLE INC'
+# my_years <- 2013:2018
+# type_data <- 'yearly'
+# 
+# df_fin_reports <- get_edgar_fin_data(companies = my_company,
+#                                      years = my_years,
+#                                      type_data = type_data)
+# 
+# # Remove unneccesary columns and manipulate data 
+# data_aapl<- df_fin_reports[,-c(2:7,9,11,12,13,15:17)] %>% 
+#   set_colnames(c("company","year","metric","value")) %>% 
+#   reshape2::melt(c("company","year","metric"),"value") %>%
+#   reshape2::dcast(company + year ~ metric)
+# 
+# metrics_list <- c("EarningsPerShareBasic","CommonStockDividendsPerShareDeclared","GrossProfit","NetIncomeLoss")
+# data_aapl <- data_aapl[,c(which(colnames(data_aapl) %in% c("company","year")), which(colnames(data_aapl) %in% metrics_list))]
+# 
+# head(data_aapl)
+# Helper function to get_valid_tickers to check if a URL is valid or not
+
+# valid_url <- function(url_in, t=2){
+#   con <- url(url_in)
+#   check <- suppressWarnings(try(open.connection(con,open="rt",timeout=t),silent=T)[1])
+#   suppressWarnings(try(close.connection(con),silent=T))
+#   ifelse(is.null(check),TRUE,FALSE)
+# }
+# 
+# # Function to return a subset of the parameter tickers_list based on whether or not the sec
+# # has data corresponding to the tickers in the list for the given year
+# get_valid_tickers <- function(year = 2015, foreign_bool = FALSE, tickers_list){
+#   list_valid_tickers <- vector()
+#   for(i in 1:as.numeric(length(tickers_list))){
+#     n <- as.numeric(length(tickers_list))
+#     ticker <- tolower(as.character(tickers_list[i]))
+#     message(paste0('\n',"Trying ticker ",i," of ",n,"."))
+#     tryCatch(
+#       expr = {
+#         # Try the following functions
+#         repo <- AnnualReports(ticker, foreign = foreign_bool)
+#         idx = which(as.numeric(year(repo$filing.date)) == year)
+#         filling_no <- repo$accession.no[idx] %>% str_remove_all("-")
+#         CIK_NO <- get_CIK(ticker)
+#         
+#         # Trying the URL to see if valid
+#         url_b <- paste0("https://www.sec.gov/Archives/edgar/data/",CIK_NO,"/",filling_no,"/Financial_Report.xlsx")
+#         
+#         # If the url is valid, append it to the list of valid tickers
+#         if(valid_url(url_b)){
+#           list_valid_tickers <- append(list_valid_tickers,ticker)
+#           message(paste0("Successly processed ticker ",ticker))
+#         }
+#         
+#       },
+#       error = function(e){
+#         closeAllConnections()
+#         # Print out failure message 
+#         message(paste0(ticker,": invalid ticker, year or foreign logical"))
+#       }
+#     )
+#     closeAllConnections()
+#   }
+#   return(list_valid_tickers)
+# }
+# Get a character vector containing the set of tickers that a.) pay dividends, b.) are listed in SEC for 
+# 2015 and c.) are domestic. Do so by subsetting div_ticks character vector.
+# all_sec_div_tickers <- get_valid_tickers(year = 2015, foreign = FALSE, tickers_list = div_ticks$tickers)
+
+
+# # Combine data from ex_format_list2 which is not missing any columns 
+# data_dim <- as.numeric(lapply(ex_format_list2, function(x){ncol(data.frame(x))}))
+# ex_forma_full <- ex_format_list2[which(data_dim==8)] %>% rbindlist() %>% data.frame() %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+# # That which is missing 1 column but underlying data is still good
+# ex_forma_partial <- ex_format_list2[which(data_dim==7)] %>% rbindlist() %>% data.frame() %>% add_column(NA, .after = 5) %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+# 
+# # Combine the two together to get the final dataframe to be parsed for metrics 
+# ex_forma_full <- rbind(ex_forma_full,ex_forma_partial)
+# write.csv(ex_forma_full, file = "fin_data.csv")
+# 
+# # Combine list dataframes with rbindlist 
+
+
+# DEPENDENT ON EX_FORMAT: set the aliases for net income for the first 232 stocks you have
+# by iterating through all of the available data and hand selecting the best metric
+# net_income_names <- set_metrics("net_income")
+
+
+# Test out your parse units functions. First item in character array returned is the unit multipliers and 
+# the second item returned is the share multiplier. Check the function by looking at the units1 and units2
+# columns with the index i. 
+# i = 38
+# parse_units(ex_format_data$units1[i], ex_format_data$units2[i])
+# 
+# # Get some of the indicators for headers above eps data 
+# eps_headers <- set_metrics("eps_header",ex_forma_full)
+# headers_clue <- na.omit(eps_headers) %>% tolower() %>% str_replace_all("[^0-9A-Za-z///' ]","") %>% unique()
+# 
+# # Get some of the direct (basic) eps indicators (stopped on 119 of 263)
+# eps_alias <- set_metrics("eps_basic",ex_forma_full)
+# eps_clue <- na.omit(eps_alias) %>% tolower() %>% str_replace_all("[^0-9A-Za-z///' ]","") %>% unique()
+# eps_clue
+# 
+# # Get a character vector with ALL of the words in each of the eps_clues 
+# all_words <- vector()
+# for(i in 1:length(eps_clue)){
+#   str <- strsplit(eps_clue, ' ')[[i]]
+#   for(l in 1:length(str)){
+#     all_words <- append(all_words, str[l])
+#   }
+# }
+# 
+# # Get a data frame with all of the eps_words and the number of their occurences in all_words 
+# eps_words <- unique(all_words)
+# n <- length(eps_words)
+# for(i in 1:n){
+#   count_total[i] <- sum(str_count(all_words, eps_words[i]))
+# }
+# 
+# # Add a col for number of lines in which 
+# eps_words_data <- data.frame(eps_words, count) 
+# eps_words_data <- eps_words_data[order(eps_words_data$count, decreasing = TRUE),]
+# # Take out the word 'in' and empty char as well as anything with count less than 5.
+# eps_words_data <- eps_words_data[-c(which(eps_words_data$eps_words %in% c("in","")),which(eps_words_data$count < 5)),]
+# eps_words_data
+# 
+# # Take the top 4 of eps_words and place in a character vector. Add the word total to the list as well, exclude 'inc'.
+# hits_eps <- c(as.character(eps_words_data[which(eps_words_data[c(1:9),1]!="inc"),1]),"total","dividends","dividend")
+# hits_eps
+
+# # See how many of the lines of eps_clue contain one of the words in hit_eps
+# for(i in 1:length(eps_clue)){
+#   print(paste0(eps_clue[i], ": ", sum(str_detect(as.character(strsplit(eps_clue[i]," ")), hits_eps))))
+# }
+# Looks like we have covered all of the stocks! (119 at least). This is a good seed for our algorithmn to 
+# find all of the eps rows in the dataframe. 
+
+# Search through a subset of the data to find 5 rows with absolute value minimum vals 
+#i = 20
+#tick = unique(data_source$ticker)[i]
+#tick = 'aapl'
+#data_source = ex_forma_full
+#subset[order(abs(as.numeric(subset$y1)), decreasing = FALSE), 4]
+
+# # Order the subset dataframe by the rowwise mean of the three year variables.
+# # Using the mean allows us to ignore NA values in our computations, thus allowing even a single row occurence in one of 
+# # the three columns to be picked up on. Likewise, any row where the three cols are NA will be placed at the bottom of the frame. 
+# order_subset <- subset[order(rowMeans(abs(data.frame(as.numeric(subset$y1),as.numeric(subset$y2),as.numeric(subset$y3)))), decreasing = FALSE), ]
+# order_subset[c(1:10),]
+
+# Combine data from ex_format_list2 which is not missing any columns
+# data = ex_format_data1
+# data_dim <- as.numeric(lapply(data, function(x){ncol(data.frame(x))}))
+# 
+# ex_forma_full <- data[which(data_dim==8)] %>% rbindlist() %>% data.frame() %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+# ex_forma_partial <- data[which(data_dim==7)] %>% rbindlist() %>% data.frame() %>% add_column(NA, .after = 5) %>% set_colnames(c('ticker','name','metric','y1','y2','y3','units1','units2'))
+# 
+# # Combine the two together to get the final dataframe to be parsed for metrics
+# ex_forma_full <- rbind(ex_forma_full,ex_forma_partial)
+# write.csv(ex_forma_full, file = "fin_data.csv")
+
+# # Get all of the tickers in the first 1000 stocks (240 in total)
+# ex_format_list <- compact(ex_format_list)
+# ticks_name <- vector()
+# for(i in 1:length(ex_format_list)){
+#   df <- ex_format_list[[i]]
+#   ticker = df$ticker[1]
+#   ticks_name <- append(ticks_name, ticker)
+# }
+# 
+# # First 15 valid tickers sample of data formatted correctly
+# ex_format_data <- get_fin_list(2015, FALSE, tickers_list = ticks_name[1:15]) %>% 
+#   rbindlist() %>% 
+#   set_colnames(c("ticker","company_name","Metric","Y1","Y2","Y3","units1","units2"))

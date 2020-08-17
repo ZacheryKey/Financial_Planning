@@ -35,10 +35,15 @@ library(stringi)
 library(rlang)
 library(tibble)
 
-setwd("C:/Users/YOUR_REPO_HERE")
-# @TODO: Adjust Div model to include col that has 4% of total investment value 
 
-ex <- div_growth_invest(50, 50000, 25000, .025, .1, 1.02, .03, 1.02, 15, TRUE)
+# require(devtools)
+# install_github('ramnathv/rCharts')
+# ?install_github
+# @TODO: Adjust Div model to include col that has 4% of total investment value 
+# setwd("C:/Users/YOUR_REPO_HERE")
+# ex <- div_growth_invest(50, 50000, 25000, .025, .1, 1.02, .03, 1.02, 15, TRUE)
+
+
 
 ### ---------------------------------------- Dividend Growth Investments ---------------------------------------------###
 
@@ -177,20 +182,20 @@ ui<-fluidPage(
               br(),
               h4("Enter your financial information and retirement goals in the boxes to the right. This information will be used to simulate investment growth."),
               br(),
-              h4("Select a tab at the top of the central panel to investigate a particular investment strategy."), 
+              h4("Recomended Retirement Income should not exceed current income less yearly investment."), 
               br(),
               h4("Move sliders until retirement goals have been met, indicated by green text coloring."), 
-              br(),
-              h4("NOTE: All calculations suppose a 2.5% discount rate inflation avg.")
+              br()
             )         
           ),
           column(6,
             wellPanel(
               numericInput("current_income", h4("Yearly Income"), value = 50000, step = 1000, min = 0),
               sliderInput("pct_invested", h4("Percent Income to Invest"), value = 20, step = 1, min = 0, max = 100),
-              sliderInput("retire_income", h4("Retirement Income Goal"), value = 25000, step = 1000, min = 0, max = 50000),
+              sliderInput("retire_income", h4("Retirement Income Goal"), value = 40000, step = 1000, min = 0, max = 50000),
               sliderInput("retire_age", h4("Years until Retirement"), value = 30, step = 1, min = 1, max = 50),
-              checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE)
+              checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE),
+              actionButton("save_info", label = "Save")
             )
           )
         )
@@ -234,15 +239,30 @@ ui<-fluidPage(
                     )
                   )
               ),
-            tabPanel(title = "Stock Finder"),
+            tabPanel(title = "Investing Strategies",
+                     wellPanel(
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:265px;", htmlOutput("val_menu_txt1")),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", selectInput(inputId = "val_menu1", label = NULL, choices = c("high return","high safety margin"))),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", htmlOutput("val_menu_txt4")),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:120px;", selectInput(inputId = "val_menu3", label = NULL, choices = c("short term","long term"))),
+                       div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("get_strategies")),
+                     )
+              ),
+            tabPanel(title = "Selecting Investments"),
             tabPanel(title = "My Investments",
                          wellPanel(h4("Record New Investments")),
-                         wellPanel(h4("Check Existing Investments")))
+                         wellPanel(h4("Check Existing Investments"))
+              )
     )
   )
 )
 
+
 server <- function(input,output, session){
+  
+  ###########################
+  ###### Sidebar Panel ######
+  ###########################
   
   observeEvent(input$current_income,{
     x <- input$current_income
@@ -250,62 +270,34 @@ server <- function(input,output, session){
     updateSliderInput(session = session, inputId = "retire_income", value = y, min = 0, max = x)
   })
   
+  #################################
+  ###### Investment Simulator #####
+  #################################
+  
+  # Create the investment dataframe in order to generate plots, etc
   generate_model <- reactive({
     model <- div_growth_invest(50, input$current_income, input$retire_income, .025, (input$pct_invested/100), (1+input$dividend_growth), input$dividend_yield, (1+input$stock_growth), 15, input$increase_salary)
     return(model)
   })
   
+  # Get your income goal for retirement 
   get_goal <- reactive({
     return(as.character(round(get_income_goal(input$retire_age, input$retire_income, .025),0)))
   })
   
+  # Generate monthly income plot 
   output$plot_div_invest <- renderPlot({
     model <- generate_model()
     plot_divs(model) + geom_vline(xintercept = 12*input$retire_age, size = 1, linetype="dashed")
   })
   
+  # Generate total portfolio plot 
   output$plot_total_shares <- renderPlot({
     model <- generate_model()
     plot_shares(model) + geom_vline(xintercept = input$retire_age, size = 1, linetype="dashed")
   })
   
-  output$monthly_invest <- renderText({
-    data <- generate_model()
-    paste0(
-      " In order to meet your retirement income goal ",
-      as.character(input$retire_age),
-      " years from now, you will need at least ",
-      as.character(round(data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income_goal")],0)),
-      " dollars a month to achieve a yearly purchasing power equal to the ",
-      as.character(input$retire_income),
-      " in today's dollars."
-      )
-  })
-  
-  output$monthly_invest2 <- renderText({
-    data <- generate_model()
-    paste0(
-      "Your investment of ",
-      as.character(round((input$current_income/12)*(input$pct_invested/100),0)),
-      " dollars every month will yield ",
-      as.character(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0)),
-      " dollars a month in dividend payments in ",
-      as.character(input$retire_age),
-      " years."
-    )
-  })
-  
-  output$div_monthly_income <- renderText({
-    data <- generate_model()
-    earnings <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0),big.mark = ",", scientific = F))
-    
-    if(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")] > 0){
-      paste0("<h1><b>","<font color=\"#40e32d\">", "$", earnings,"</b></h1></font>", "<h5><b>"," div. earnings / month","</b></h5>")
-    }else{
-      paste0("<h1><b>","<font color=\"#FF0000\">", "$", earnings,"</b></h1></font>", "<h5><b>"," div. earnings / month","</b></h5>")
-    }
-  })
-  
+  # Generate earnings a month colored text
   output$total_monthly_income <- renderText({
     data <- generate_model()
     total_val <- data[((input$retire_age*12)),which(colnames(data)=="monthly_income")] + data[((input$retire_age*12)),which(colnames(data)=="four_percent_mnthly")]
@@ -318,18 +310,21 @@ server <- function(input,output, session){
     }
   })
   
+  # Generate net value colored text
   output$portfolio_worth <- renderText({
     data <- generate_model()
     worth <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="investment_total_value")],0), big.mark = ",", scientific = F))
     paste0("<h1><b>","<font color=\"#40e32d\">", "$", worth,"</b></h1></font>", "<h5><b>"," net value of investments","</b></h5>")
   })
- 
+
+  # Generate total dollars invested color text
   output$dollars_invested <- renderText({
     data <- generate_model()
     invested <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="income_invested")],0), big.mark = ",", scientific = F))
     paste0("<h1><b>","<font color=\"#40e32d\">", "$", invested,"</b></h1></font>", "<h5><b>"," dollars / invested","</b></h5>")
   })
   
+  # Generate years until retirement text 
   output$yrs_until_retire <- renderText({
     data <- generate_model()
     years <- as.character(get_years(data))
@@ -346,22 +341,86 @@ server <- function(input,output, session){
     }
   })
   
+  # Genrate subplot text additional info, disclaimers and such 
   output$msg <- renderText({
     paste("<h2><b>","  Investment", "<br>" ,"Outlook:","</b></h2>")
   })
   
   output$msg2 <- renderText({
     paste("<h5>"," *Calculations performed in terms of present day dollars, valuations calculated over a ", input$retire_age, " yr. period.",
-          "Earnings per month calculated assuming 4% yearly liquidation of assets. ", "<br>",
-          "**Model Estimations assumes constant inflation rate of 2.5% annually with all numbers above calculated to predict value of investment at time of retirement year goal.", "<br>",
+          "Earnings per month calculated assuming 4% yearly liquidation of assets and dividend reinvestment. ", #"<br>",
+          "Model Estimations assumes constant inflation rate of 2.5% annually with all numbers above calculated to predict value of investment at time of retirement year goal.", #"<br>",
           "</h5>")
   })
   
+  #####################################
+  ##### Investment Strategies Tab #####
+  #####################################
+  
+  # Get Text output evaluating your prefferred method of investing
+  output$val_menu_txt1 <- renderText({
+    paste0("<h5>","It is important that my investments have a ","</h5>")
+  })
+  
+  output$val_menu_txt2 <- renderText({
+    paste0("<h5>"," I plan to take on a(n) ","</h5>")
+  })
+  
+  output$val_menu_txt3 <- renderText({
+    paste0("<h5>"," management approach to investing. ","</h5>")
+  })
+  
+  output$val_menu_txt4 <- renderText({
+    paste0("<h5>",". I plan on investing for the ","</h5>")
+  })
+  
+  # Set up variables to monitor the status of dropdowns for return/safety and length of term
+  high_return <- reactiveVal(TRUE)
+  short_term <- reactiveVal(TRUE)
+  
+  # Update variables as input variables are changed by user 
+  observeEvent(input$val_menu3,{
+    if(input$val_menu3=="long term"){
+      short_term(FALSE)
+    }else{
+      short_term(TRUE)
+    }
+  })
+  
+  observeEvent(input$val_menu1,{
+    if(input$val_menu1=="high safety margin"){
+      high_return(FALSE)
+    }else{
+      high_return(TRUE)
+    }
+  })
+  
+  output$get_strategies <- renderText({
+    if(high_return() & short_term()){
+      paste0("<p>","Investors prioritizing","<b>"," high returns","</b>"," and looking for","<b>"," short term","</b>"," investments will need to maintain an", "<b>"," active", "</b>"," management strategy", "</p>",
+             "<p>","by committing","<b>"," more time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," very risky","</b>"," investment strategies","</p>",
+             "<p>","with potentially high returns.","</p>")
+    }else if(!high_return() & !short_term()){
+      paste0("<p>","Investors prioritizing","<b>"," high safety margins","</b>"," and looking for","<b>"," long term","</b>"," investments can maintain a", "<b>"," passive", "</b>"," management strategy", "</p>",
+             "<p>","and commit","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," very safe","</b>"," investment strategies","</p>",
+             "<p>","and recieve mid to high returns.","</p>")
+    }else if(high_return() & !short_term()){
+      paste0("<p>","Investors prioritizing","<b>"," high returns","</b>"," and looking for","<b>"," long term","</b>"," investments can maintain an", "<b>"," active", "</b>"," management strategy", "</p>",
+             "<p>","by committing","<b>"," more time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," somewhat risky","</b>"," investment strategies","</p>",
+             "<p>","with potentially high returns.","</p>")
+    }else{
+      paste0("<p>","Investors prioritizing","<b>"," high safety margins","</b>"," and looking for","<b>"," short term","</b>"," investments can maintain a", "<b>"," passive", "</b>"," management strategy", "</p>",
+             "<p>","by committing","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," somewhat safe","</b>"," investment strategies","</p>",
+             "<p>","and recieve relatively low returns.","</p>")
+    }
+  })
+  
+  
 }
-
 
 # Launch the shiny application itself 
 shinyApp(ui = ui, server = server)
+
 
 # More information in the model: 
 # Calculate when you can live off of withdrawal of 4% of your investments to reach your retirement goals. 
@@ -858,6 +917,7 @@ get_divs_stats<-function(div_dat2){
 }
 
 
+
 # # Write Div_ticks to csv. Write 
 # write.csv(div_ticks, "C:\\Users\\Zachery Key\\Desktop\\Financial_Project\\div_ticks.csv", row.names = FALSE)
 
@@ -947,6 +1007,71 @@ colnames(div_info)[which(colnames(div_info) %in% c("y1","y2","y3"))] <- c(2015, 
 'apog'
 'ato'
 'cato'
+
+
+
+# Dont think I like this that much 
+strategies <- c("Indexing","Income Investing","REITs","Growth Investing","Value Investing","Penny Stocks","Futures and Options")
+variables <- c("Risk", "Short term return", "Long term return", "Supervision", "Volatility")
+
+fig <- plot_ly(
+  type = 'scatterpolar',
+  fill = 'toself',
+  mode = 'markers'
+) 
+fig <- fig %>%
+  add_trace(
+    r = c(1,1,5,2,1),
+    theta = variables,
+    name = strategies[1]
+  ) 
+fig <- fig %>%
+  add_trace(
+    r = c(1,2,5,2,2),
+    theta = variables,
+    name = strategies[2]
+  )
+fig <- fig %>%
+  add_trace(
+    r = c(2,2,4,2,2),
+    theta = variables,
+    name = strategies[3]
+  )
+fig <- fig %>%
+  add_trace(
+    r = c(2.5,4,4,3,3),
+    theta = variables,
+    name = strategies[4]
+  )
+fig <- fig %>%
+  add_trace(
+    r = c(2,2,5,4,3),
+    theta = variables,
+    name = strategies[5]
+  )
+fig <- fig %>%
+  add_trace(
+    r = c(4,4,3,5,4),
+    theta = variables,
+    name = strategies[6]
+  )
+fig <- fig %>%
+  add_trace(
+    r = c(5,5,2,5,5),
+    theta = variables,
+    name = strategies[7]
+  )
+fig <- fig %>%
+  layout(
+    polar = list(
+      radialaxis = list(
+        visible = T,
+        range = c(0,5)
+      )
+    )
+  )
+
+fig
 
 ### --------------------------------- Depricated Code -------------------------------- ###
 
@@ -1466,3 +1591,41 @@ colnames(div_info)[which(colnames(div_info) %in% c("y1","y2","y3"))] <- c(2015, 
 #     scale_y_continuous(limits = c(0,20000), labels = comma)
 #   return(monthly_income_graph)
 # }
+
+# # DEPRICATED SHINY SERVER CODE 
+# output$monthly_invest <- renderText({
+#   data <- generate_model()
+#   paste0(
+#     " In order to meet your retirement income goal ",
+#     as.character(input$retire_age),
+#     " years from now, you will need at least ",
+#     as.character(round(data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income_goal")],0)),
+#     " dollars a month to achieve a yearly purchasing power equal to the ",
+#     as.character(input$retire_income),
+#     " in today's dollars."
+#   )
+# })
+# # DEPRICATED
+# output$monthly_invest2 <- renderText({
+#   data <- generate_model()
+#   paste0(
+#     "Your investment of ",
+#     as.character(round((input$current_income/12)*(input$pct_invested/100),0)),
+#     " dollars every month will yield ",
+#     as.character(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0)),
+#     " dollars a month in dividend payments in ",
+#     as.character(input$retire_age),
+#     " years."
+#   )
+# })
+# # DEPRICATED 
+# output$div_monthly_income <- renderText({
+#   data <- generate_model()
+#   earnings <- as.character(format(round(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")],0),big.mark = ",", scientific = F))
+#   
+#   if(data[((input$retire_age*12)),which(colnames(data)=="monthly_income")] > 0){
+#     paste0("<h1><b>","<font color=\"#40e32d\">", "$", earnings,"</b></h1></font>", "<h5><b>"," div. earnings / month","</b></h5>")
+#   }else{
+#     paste0("<h1><b>","<font color=\"#FF0000\">", "$", earnings,"</b></h1></font>", "<h5><b>"," div. earnings / month","</b></h5>")
+#   }
+# })

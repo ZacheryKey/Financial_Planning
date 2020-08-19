@@ -171,6 +171,25 @@ plot_shares <- function(div_growth_model1){
   return(total_investment_graph)
 }
 
+# Plot the type of investment vs risk level in a bar chart
+plot_strat <-function(data_vals){
+  strat_plot <- ggplot() + geom_bar(data = data_vals, mapping = aes(x = reorder(investment_types, rsk_vec), y = rsk_vec, group = rsk_vec, fill = color_code), stat = "identity") + 
+    xlab(" ") + ylab("Level of Risk") + ggtitle("Risk Level by Investment Strategy") + 
+    scale_y_continuous(breaks = c(1,2,3,4,5), labels = c("Low","Mid-Low","Mid","Mid-High","High")) + 
+    scale_fill_manual(values=c("#999999", "#E69F00", "#FFD000")) +
+    theme(axis.text.x = element_text(angle = 37.5, hjust = 1),
+          legend.position = "none"
+          ,plot.background = element_rect(fill = "#f5f5f5")
+          ,panel.background = element_rect(fill = "#f5f5f5")
+          ,panel.grid.major = element_line(color = "black")
+          ,panel.grid.minor = element_line(color = "black")
+          ) 
+  return(strat_plot)
+}
+
+# "#E69F00", "#FFD000"
+# "#7ea3c5", "#51c6df"
+
 # Create your shiny app User inferface to allow user to play around with the different variables in dividend growth investing 
 ui<-fluidPage(
     sidebarPanel(
@@ -178,13 +197,13 @@ ui<-fluidPage(
         fluidRow(
           column(6,
             wellPanel(
-              h3("Welcome!"),
+              h4("Welcome!"),
               br(),
               h4("Enter your financial information and retirement goals in the boxes to the right. This information will be used to simulate investment growth."),
               br(),
               h4("Recomended Retirement Income should not exceed current income less yearly investment."), 
               br(),
-              h4("Move sliders until retirement goals have been met, indicated by green text coloring."), 
+              h4("Move sliders until retirement goals have been met, indicated by green text coloring. Income goals have been met at the intersection of the red line and the blue area."), 
               br()
             )         
           ),
@@ -195,6 +214,7 @@ ui<-fluidPage(
               sliderInput("retire_income", h4("Retirement Income Goal"), value = 40000, step = 1000, min = 0, max = 50000),
               sliderInput("retire_age", h4("Years until Retirement"), value = 30, step = 1, min = 1, max = 50),
               checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE),
+              br(),
               actionButton("save_info", label = "Save")
             )
           )
@@ -207,6 +227,7 @@ ui<-fluidPage(
                   fluidRow(
                       wellPanel(style = "background: #FFFFFF",
                         fluidRow(
+                          div(htmlOutput("title_tab1")),
                             column(6,
                                   plotOutput("plot_div_invest", width = 575, height = 360),
                                   br(),
@@ -218,9 +239,9 @@ ui<-fluidPage(
                                   br()
                             ),
                             column(12,
-                                  column(4,sliderInput("stock_growth",h4("Annual Stock Growth Rate (10 yr. avg)"), value = 0.04, min = 0, max = .15, step = .01)),
-                                  column(4,sliderInput("dividend_growth",h4("Annual Dividend Growth Rate (10 yr. avg)"), value = 0.03, min = 0, max = .15, step = .01)),
-                                  column(4,sliderInput("dividend_yield",h4("Annual Dividend Yield (10 yr. avg)"), value = 0.03, min = 0, max = .15, step = .01))
+                                  column(4,sliderInput("stock_growth",h4("Avg. Annual Portfolio Growth Rate"), value = 0.04, min = 0, max = .15, step = .01)),
+                                  column(4,sliderInput("dividend_growth",h4("Avg. Annual Dividend Growth Rate"), value = 0.03, min = 0, max = .15, step = .01)),
+                                  column(4,sliderInput("dividend_yield",h4("Avg. Annual Dividend Yield"), value = 0.03, min = 0, max = .15, step = .01))
                              ),
                           ),
                         ),
@@ -241,11 +262,28 @@ ui<-fluidPage(
               ),
             tabPanel(title = "Investing Strategies",
                      wellPanel(
-                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:265px;", htmlOutput("val_menu_txt1")),
+                       div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("priority_title")),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 10px; width:275px;", htmlOutput("val_menu_txt1")),
                        div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", selectInput(inputId = "val_menu1", label = NULL, choices = c("high return","high safety margin"))),
                        div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", htmlOutput("val_menu_txt4")),
                        div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:120px;", selectInput(inputId = "val_menu3", label = NULL, choices = c("short term","long term"))),
-                       div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("get_strategies")),
+                       div(style="line-height:100%; border: 1px; margin: 1px; padding-left: 10px; padding-top: 1px;", htmlOutput("get_strategies")),
+                       br(),
+                       div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("pref")),
+                       div(style = "padding-left:10px;",radioButtons(inputId = "strategy_button", label = NULL, choices = c("Penny Stocks","Options"), inline = TRUE)),
+                       splitLayout(
+                         cellWidths = c("40%","20%","40%"),
+                            div(style = "padding-left:10px;",plotOutput("risk_strat_plot", width = 400, height = 400)),
+                            div(
+                                htmlOutput("get_return_cat"),
+                                htmlOutput("security_lvl"),
+                                htmlOutput("get_interest")
+                                ),
+                            div()
+                      ),
+                       wellPanel(
+                          htmlOutput("detail_strat")
+                       )
                      )
               ),
             tabPanel(title = "Selecting Investments"),
@@ -270,9 +308,14 @@ server <- function(input,output, session){
     updateSliderInput(session = session, inputId = "retire_income", value = y, min = 0, max = x)
   })
   
+  
   #################################
   ###### Investment Simulator #####
   #################################
+  
+  output$title_tab1 <- renderText({
+    paste0("<h3><b>","Tax Free Investment Growth Simulator","</b><h3>")
+  })
   
   # Create the investment dataframe in order to generate plots, etc
   generate_model <- reactive({
@@ -303,7 +346,7 @@ server <- function(input,output, session){
     total_val <- data[((input$retire_age*12)),which(colnames(data)=="monthly_income")] + data[((input$retire_age*12)),which(colnames(data)=="four_percent_mnthly")]
     earnings <- as.character(format(round(total_val,0),big.mark = ",", scientific = F))
     
-    if(total_val >= data[((input$retire_age*12)-1), which(colnames(data)=="monthly_income_goal")]){
+    if(total_val >= data[((input$retire_age*12)), which(colnames(data)=="monthly_income_goal")]){
       paste0("<h1><b>","<font color=\"#40e32d\">", "$", earnings,"</b></h1></font>", "<h5><b>","total earnings / month","</b></h5>")
     }else{
       paste0("<h1><b>","<font color=\"#FF0000\">", "$", earnings,"</b></h1></font>", "<h5><b>","total earnings / month","</b></h5>")
@@ -332,9 +375,9 @@ server <- function(input,output, session){
       years = paste0(">50")
     }
     
-    mnthInc = data[((input$retire_age*12)-1), which(colnames(data)=="monthly_income")] + data[((input$retire_age*12)-1),which(colnames(data)=="four_percent_mnthly")]
+    mnthInc = data[((input$retire_age*12)), which(colnames(data)=="monthly_income")] + data[((input$retire_age*12)),which(colnames(data)=="four_percent_mnthly")]
 
-    if(mnthInc >= data[((input$retire_age*12)-1),which(colnames(data)=="monthly_income_goal")]){
+    if(mnthInc >= data[((input$retire_age*12)),which(colnames(data)=="monthly_income_goal")]){
       paste0("<h1><b>","<font color=\"#40e32d\">", years,"</b></h1></font>", "<h5><b>"," yrs. to income goal","</b></h5>")
     }else{
       paste0("<h1><b>","<font color=\"#FF0000\">", years,"</b></h1></font>", "<h5><b>"," yrs. to income goal","</b></h5>")
@@ -356,6 +399,11 @@ server <- function(input,output, session){
   #####################################
   ##### Investment Strategies Tab #####
   #####################################
+  
+  # Get all of the text under the My investment preferances title
+  output$priority_title <- renderText({
+    paste0("<h5>","<b>","<u>","My Investment Preferences:","</u>","</b>","</h5>")
+  })
   
   # Get Text output evaluating your prefferred method of investing
   output$val_menu_txt1 <- renderText({
@@ -399,27 +447,225 @@ server <- function(input,output, session){
     if(high_return() & short_term()){
       paste0("<p>","Investors prioritizing","<b>"," high returns","</b>"," and looking for","<b>"," short term","</b>"," investments will need to maintain an", "<b>"," active", "</b>"," management strategy", "</p>",
              "<p>","by committing","<b>"," more time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," very risky","</b>"," investment strategies","</p>",
-             "<p>","with potentially high returns.","</p>")
+             "<p>","expecting potentially high returns.","</p>")
     }else if(!high_return() & !short_term()){
       paste0("<p>","Investors prioritizing","<b>"," high safety margins","</b>"," and looking for","<b>"," long term","</b>"," investments can maintain a", "<b>"," passive", "</b>"," management strategy", "</p>",
-             "<p>","and commit","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," very safe","</b>"," investment strategies","</p>",
-             "<p>","and recieve mid to high returns.","</p>")
+             "<p>","by committing","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," somewhat safe","</b>"," investment strategies","</p>",
+             "<p>","expecting","<b>"," mid to high returns.","</b>","</p>")
     }else if(high_return() & !short_term()){
       paste0("<p>","Investors prioritizing","<b>"," high returns","</b>"," and looking for","<b>"," long term","</b>"," investments can maintain an", "<b>"," active", "</b>"," management strategy", "</p>",
              "<p>","by committing","<b>"," more time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," somewhat risky","</b>"," investment strategies","</p>",
-             "<p>","with potentially high returns.","</p>")
+             "<p>","expecting potentially high returns.","</p>")
     }else{
       paste0("<p>","Investors prioritizing","<b>"," high safety margins","</b>"," and looking for","<b>"," short term","</b>"," investments can maintain a", "<b>"," passive", "</b>"," management strategy", "</p>",
-             "<p>","by committing","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," somewhat safe","</b>"," investment strategies","</p>",
-             "<p>","and recieve relatively low returns.","</p>")
+             "<p>","by committing","<b>"," less time","</b>"," to monitoring their investments and may wish to consider the following","<b>"," very safe","</b>"," investment strategies","</p>",
+             "<p>","expecting relatively","<b>"," low returns.","</b>","</p>")
     }
   })
   
+  # Update radio buttons when either the return or period dropdown menu is altered
+  observeEvent(
+    {input$val_menu1 
+    input$val_menu3},
+    
+    {if(high_return() & short_term()){
+      choice_vec <- c("Options","Day Trading","Penny Stocks")
+    }else if(high_return() & !short_term()){
+      choice_vec <- c("Value Investing","Growth Investing")
+    }else if(!high_return() & short_term()){
+      choice_vec <- c("Savings Account","CDs","Money Market Accounts","Short-term Corporate Bonds")
+    }else{
+      choice_vec <- c("Dividend Growth Investing","Indexing / ETFs","Long-term Treasury Bonds","Blue Chip Stocks")
+    }
+      updateRadioButtons(session = session, inputId = "strategy_button", label = NULL,  choices = choice_vec, inline = TRUE)
+  })
+  
+  output$pref <- renderText({
+    paste0("<h5>","<b>","<u>","Investment Strategies based on your investing preferences:","</u>","</b>","</h5>")
+  })
+  
+  # Get a summary of each investmen strategy from under the barplot
+  output$detail_strat <- renderText({
+    if(input$strategy_button == "Options"){
+      paste0("<h3>","Options Trading","</h3>",
+             "<p>","<b>","Description:","</b>"," Options are paid contracts that allow owners to buy or sell an asset at a certain price or by a certain date. ","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Buying options can provide investors a 'hedge' against negative market trends on stocks they own by essentially 'freezing' the price of the stock and can reduce the amount of money an investor needs to initially purchase an investment.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Because options are contracted, the option buyer must pay a fee to enter the agreement. The options seller carries the risk of losing all of their investment without the power to withdraw from the contract. 
+                The limitation on the time the both parties have agreed upon on the contract also reduces the potential earnings an options contract can secure. ","</p>"
+             )
+    }else if(input$strategy_button == "Day Trading"){
+      paste0("<h3>","Day Trading","</h3>",
+             "<p>","<b>","Description:","</b>"," Buying and selling an asset in the same day with the expectation of generating immediate returns. ","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Day trading provides the highly active investor with immediate income and the highest possible rate of return. Good bullish day traders can expect very high yields when the market is up and good bearish day traders can make money in options when the market declines.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Day trading is only for investors who wish to invest great amounts of time and energy in market research and are willing to shoulder substantial risk from the days their investments lose significant value. Day trading is highly speculative by nature and as such is one of the most volatile and risky investment strategies.   ","</p>")
+    }else if(input$strategy_button == "Penny Stocks"){
+      paste0("<h3>","Penny Stocks","</h3>",
+             "<p>","<b>","Description:","</b>"," Investing in low-value stocks (<$5/share) with the expectation of recieving high returns if/when an asset increases considerably in value. ","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Penny stocks offer low cost entry into the stock market with the possibility of generating passive returns if a company takes off and starts increasing its market share. Penny Stocks are also very accessible and a very diverse portfolio can be built relatively cheaply. ","</p>",
+             "<p>","<b>","Risks: ","</b>"," Buying Penny Stocks shoulders significant risks of losing money as low value stocks are extremely volatile and often unlikely to ever grow significantly in value. Penny stocks are never a good idea for beginning investors and should not be considered without considerable amounts of market research.  ","</p>")
+    }else if(input$strategy_button == "Value Investing"){
+      paste0("<h3>","Value Investing","</h3>",
+             "<p>","<b>","Description:","</b>"," Value Investors look to purchase good stocks at a discounted price in order to recieve a larger return in the future. ","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Value investing has the ability to provide investors with a substantial amount of wealth over the long run. Value investing in good quality large companies during a recession will allow you to get stock 'on sale'.","</p>",
+             "<p>","<b>","Risks: ","</b>"," The single largest risk with value investing is correctly determining which companies will be able to recover from a financial setback. This means that value investors should be prepared to spend a decent amount of time determining a company's eligibility by their financial statements. ",
+             "Investing in a 'value' stock that continues downward can greatly decrease investment value.","</p>")
+    }else if(input$strategy_button == "Growth Investing"){
+      paste0("<h3>","Growth Investing","</h3>",
+             "<p>","<b>","Description:","</b>"," Growth Investors look to purchase stocks from growing companies that are expected to greatly increase in value over the term of investment.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Growth investing can result in high returns on companies that are moving into new market sectors or have introduced new and useful technologies. Investing in a company's IPO (initial public offering, or when a company first decides to sell stock to the public) is an example of growth investing.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Risks in growth investing include over-speculation on a company's performance, high volatility, and over-valuation for relatively young organizations. Many Companies may look appealing on paper or in theory, but because growth stocks are composed of younger companies they are more volatile than other more established organizations. Most Growth stocks do not pay dividends as the focus of the compnay is on increasing total company value instead of creating shareholder value.","</p>")
+    }else if(input$strategy_button == "Savings Account"){
+      paste0("<h3>","Savings Account","</h3>",
+             "<p>","<b>","Description:","</b>"," Placing your money in a bank or related finacial institution with relatively low interest rates, minimal risk and high liquidity.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Savings accounts are backed by the FDIC up to 250k and offer a virtually risk free investment. The benefits to having a savings account are high liquidity, FDIC insured money, and lack of external risk.","</p>",
+             "<p>","<b>","Risks: ","</b>"," The primary risk of placing money in a savings account is value erosion due to inflation (most banks do not offer an interest rate greater than 2.5%). ","</p>")
+    }else if(input$strategy_button == "CDs"){
+      paste0("<h3>","CDs","</h3>",
+             "<p>","<b>","Description:","</b>"," Certificates of Deposit are fixed-time investments made with banks and credit unions. ","</p>",
+             "<p>","<b>","Benefits: ","</b>"," CD's (like savings accounts) are backed by the FDIC up to 250k and offer a virtually risk free investment. In exchange for providing a set amount of money for a fixed term, banks and financial institutions offer higher interest rates for CD's than savings or checking accounts.
+                Longer terms of deposit and larger principal investments will recieve greater asset appreciation.","</p>",
+             "<p>","<b>","Risks: ","</b>"," The single greatest risk with CDs happens in the event the money is withdrawn prior to the date agreed upon starting the investment. Withdrawing prior to the contract's expiration encurs significant penalties and as such, CDs should never be used to supplement cash or other liquid investments.","</p>")
+    }else if(input$strategy_button == "Money Market Accounts"){
+      paste0("<h3>","Money Market Accounts","</h3>",
+             "<p>","<b>","Description:","</b>"," High interest bearing accounts with checking and debit abilities as well as some restrictions.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Higher interest rates than savings accounts, checking and debit abilities, FDIC protection. ","</p>",
+             "<p>","<b>","Risks: ","</b>"," Minimum Balance, Account Fees and Limited number of transfers and payments per month. ","</p>")
+    }else if(input$strategy_button == "Short-term Corporate Bonds"){
+      paste0("<h3>","Short-term Corporate Bonds","</h3>",
+             "<p>","<b>","Description:","</b>"," Bonds issued by companies to fund their investments with maturity of less than 5 years.","</p>",
+             "<p>","<b>","Benefits: ","</b>","  High Liquidity, can be bought or sold any time the stock market is open. Higher interest rates than savings, checking or money market accounts. Since the term these bonds are held is so small, there is a very low risk of rising interest rates decreasing the value of the bond.  ","</p>",
+             "<p>","<b>","Risks: ","</b>"," Short term corporate bonds have relatively low risk, but are more volatile than any of the other high security low risk short term investments in this section. Also, corporate bonds have a greater risk of default than investing in bonds issued by the government.","</p>")
+    }else if(input$strategy_button == "Dividend Growth Investing"){
+      paste0("<h3>","Dividend Growth Investing","</h3>",
+             "<p>","<b>","Description:","</b>"," Dividend Growth Investments are high div. yield/high div. growth stocks that pay regular dividends to shareholders.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," This style of investing will hedge against negative stock market flucations and prevent excessive withdrawal from investment accounts during retirement, thus allowing continued investment growth. Generally speaking, this method
+                  exposes investors to owning portions of large high quality businesses with steady growth that assists in compounding wealth over time. The largest benefit to using this method is the creation of future income flow and reducing dependency on speculative performance of the stock.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Some high div. growth / yield investments are not always reliable choices and can quickly destroy value if the focus of the business is on providing dividends and not on creating value. It is generally a bad idea to select a stock with dividend payouts over 50% of net income.","</p>")
+    }else if(input$strategy_button == "Indexing / ETFs"){
+      paste0("<h3>","Indexing / ETFs","</h3>",
+             "<p>","<b>","Description:","</b>"," Index Funds / ETFs are investment 'buckets' that contain a large number of related stocks.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Index funds and exchange traded funds (ETFs) are a great way to diversify your investment. Both of these types of investments are also 'self-cleansing' and underperforming stocks are booted out of the fund, automatically preventing large losses.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Because some ETF or index funds are comprised of shares in a similar market sector, when a portion of the market loses value, the ETF tracking it will also decrease in value. Some of these investments also encure a small investing fee (<1%) that will reduce the total value of your investment.","</p>")
+    }else if(input$strategy_button == "Long-term Treasury Bonds"){
+      paste0("<h3>","Long Term Treasury Bonds","</h3>",
+             "<p>","<b>","Description:","</b>"," Buying long-term debt from the government with very low risk of default and a low but steady interest rate.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Very low risk of default, high security investments that hedge against deflation. Some bonds providing tax advantages.","</p>",
+             "<p>","<b>","Risks: ","</b>"," Buying large bonds in unstable governments have a risk of default. Lower interest rates on treasury bonds present an oppurtunity cost of money that could have been invested at higher rates of return. US Treasury bonds have been decreasing in interest rates since 1980 and the trend is likely to continue.","</p>")
+    }else if(input$strategy_button == "Blue Chip Stocks"){
+      paste0("<h3>","Blue Chip Stocks","</h3>",
+             "<p>","<b>","Description:","</b>"," Invest in large market cap companies with well-established reputations.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Investing in Blue Chip Companies reduces the uncertainty and volatility of your investment. Larger corporations move realtivly slowly, allowing investors more time to add or subtract from their holdings. Growth in these stocks is stable, preventing large flucations. ","</p>",
+             "<p>","<b>","Risks: ","</b>"," Blue Chip Companies are incredibly stable in the short term but often face competition from emerging organizations or improving technologies. Consider the fact that the Dow Jones (group of top 30 performing stocks in US) has changed 55 times since 1896.","</p>")
+    }else{}
+  })
+  
+  # Create a dataframe with risk, return and color for barchart based on type of investment 
+  get_col <- reactive({
+    rsk_vec <- c(4,5,5,3,3,.5,1,.5,1.5,2,2,1,2)
+    ret_vec <- c(4,5,5,4,4,1,1,1,2,4,4,2,4)
+    tme_vec <- c(4,5,5,4,4,1,1,1,1,3,3,1,3)
+    investment_types <- c("Options","Day Trading","Penny Stocks","Value Investing","Growth Investing","Savings Account","CDs","Money Market Accounts","Short-term Corporate Bonds","Dividend Growth Investing","Indexing / ETFs","Long-term Treasury Bonds","Blue Chip Stocks") %>% factor()
+    return_pct <- c(NA, NA, NA, NA, NA, .001, .004, .0011, .025, .10, .10, .02, .10)
+    compare_types <- data.frame(investment_types, return_pct, ret_vec, rsk_vec, tme_vec)
+    
+    if(high_return() & short_term()){
+      Vec_Color <- c(1,1,1,0,0,0,0,0,0,0,0,0,0)
+    }else if(!high_return() & !short_term()){
+      Vec_Color <- c(0,0,0,0,0,0,0,0,0,1,1,1,1)
+    }else if(high_return() & !short_term()){
+      Vec_Color <- c(0,0,0,1,1,0,0,0,0,0,0,0,0)
+    }else{
+      Vec_Color <- c(0,0,0,0,0,1,1,1,1,0,0,0,0)
+    }
+    
+    if(input$strategy_button == "Options"){
+      Vec_Color[1] = 2
+    }else if(input$strategy_button == "Day Trading"){
+      Vec_Color[2] = 2
+    }else if(input$strategy_button == "Penny Stocks"){
+      Vec_Color[3] = 2
+    }else if(input$strategy_button == "Value Investing"){
+      Vec_Color[4] = 2
+    }else if(input$strategy_button == "Growth Investing"){
+      Vec_Color[5] = 2
+    }else if(input$strategy_button == "Savings Account"){
+      Vec_Color[6] = 2
+    }else if(input$strategy_button == "CDs"){
+      Vec_Color[7] = 2
+    }else if(input$strategy_button == "Money Market Accounts"){
+      Vec_Color[8] = 2
+    }else if(input$strategy_button == "Short-term Corporate Bonds"){
+      Vec_Color[9] = 2
+    }else if(input$strategy_button == "Dividend Growth Investing"){
+      Vec_Color[10] = 2
+    }else if(input$strategy_button == "Indexing / ETFs"){
+      Vec_Color[11] = 2
+    }else if(input$strategy_button == "Long-term Treasury Bonds"){
+      Vec_Color[12] = 2
+    }else if(input$strategy_button == "Blue Chip Stocks"){
+      Vec_Color[13] = 2
+    }else{}
+    
+    data_frame_strat <- mutate(compare_types, color_code = factor(Vec_Color))
+    return(data_frame_strat)
+  })
+  
+  # Plot the barchart colored based on user selection 
+  output$risk_strat_plot <- renderPlot({
+    plot_strat(get_col())
+  })
+  
+  # Get large yellow font data on risk, management and return pct 
+  output$get_interest <- renderText({
+    compare_types <- get_col()
+    interest_rate <- compare_types[which(compare_types$investment_types == input$strategy_button),2]
+    
+    if(!is.na(interest_rate)){
+        paste0("<h2><b>","<font color=\"#FFD000\">", 100*interest_rate, "%", "</font>","</b></h2>", 
+                  "<h5>", "avg. annual return", "</h5>")
+    }else{
+      paste0("<h2><b>","<font color=\"#FFD000\">", ">15%", "</font>","</b></h2>", 
+             "<h5>", "expected annual return", "</h5>")
+    }
+  })
+  
+  output$get_return_cat <- renderText({
+    compare_types <- get_col()
+    return_rate <- as.numeric(compare_types[which(compare_types$investment_types == input$strategy_button),3])
+    if(0<return_rate & return_rate<=1){
+         paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+    }else if(1<return_rate & return_rate<=2){
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+    }else if(2<return_rate & return_rate<=3){
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+    }else if(3<return_rate & return_rate<=4){
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+    }else{
+        paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+    }
+  })
+  
+  output$security_lvl <- renderText({
+    compare_types <- get_col()
+    risk_rate <- as.numeric(compare_types[which(compare_types$investment_types == input$strategy_button),4])
+    if(0<risk_rate & risk_rate<=1){
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+    }else if(1<risk_rate & risk_rate<=2){
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+    }else if(2<risk_rate & risk_rate<=3){
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+    }else if(3<risk_rate & risk_rate<=4){
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+    }else{
+      paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "invest. risk  level", "</h5>")
+    }
+  })
   
 }
 
 # Launch the shiny application itself 
 shinyApp(ui = ui, server = server)
+
 
 
 # More information in the model: 
@@ -1628,4 +1874,35 @@ fig
 #   }else{
 #     paste0("<h1><b>","<font color=\"#FF0000\">", "$", earnings,"</b></h1></font>", "<h5><b>"," div. earnings / month","</b></h5>")
 #   }
+# })
+
+
+# output$pic_strat <-renderPlot({
+#   if(input$strategy_button == "Options"){
+#     
+#   }else if(input$strategy_button == "Day Trading"){
+#     
+#   }else if(input$strategy_button == "Penny Stocks"){
+#     
+#   }else if(input$strategy_button == "Value Investing"){
+#     
+#   }else if(input$strategy_button == "Growth Investing"){
+#     
+#   }else if(input$strategy_button == "Savings Account"){
+#     
+#   }else if(input$strategy_button == "CDs"){
+#     
+#   }else if(input$strategy_button == "Money Market Accounts"){
+#     
+#   }else if(input$strategy_button == "Short-term Corporate Bonds"){
+#     
+#   }else if(input$strategy_button == "Dividend Growth Investing"){
+#     
+#   }else if(input$strategy_button == "Indexing / ETFs"){
+#     
+#   }else if(input$strategy_button == "Long-term Treasury Bonds"){
+#     
+#   }else if(input$strategy_button == "Blue Chip Stocks"){
+#     
+#   }else{}
 # })

@@ -177,7 +177,8 @@ plot_strat <-function(data_vals){
     xlab(" ") + ylab("Level of Risk") + ggtitle("Risk Level by Investment Strategy") + 
     scale_y_continuous(breaks = c(1,2,3,4,5), labels = c("Low","Mid-Low","Mid","Mid-High","High")) + 
     scale_fill_manual(values=c("#999999", "#E69F00", "#FFD000")) +
-    theme(axis.text.x = element_text(angle = 37.5, hjust = 1),
+    theme(axis.text.x = #element_blank(),
+            element_text(angle = 37.5, hjust = 1),
           legend.position = "none"
           ,plot.background = element_rect(fill = "#f5f5f5")
           ,panel.background = element_rect(fill = "#f5f5f5")
@@ -186,9 +187,6 @@ plot_strat <-function(data_vals){
           ) 
   return(strat_plot)
 }
-
-# "#E69F00", "#FFD000"
-# "#7ea3c5", "#51c6df"
 
 # Create your shiny app User inferface to allow user to play around with the different variables in dividend growth investing 
 ui<-fluidPage(
@@ -272,14 +270,21 @@ ui<-fluidPage(
                        div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("pref")),
                        div(style = "padding-left:10px;",radioButtons(inputId = "strategy_button", label = NULL, choices = c("Penny Stocks","Options"), inline = TRUE)),
                        splitLayout(
-                         cellWidths = c("40%","20%","40%"),
-                            div(style = "padding-left:10px;",plotOutput("risk_strat_plot", width = 400, height = 400)),
+                         cellWidths = c("30%","50%","20%"),
                             div(
+                                br(),
+                                htmlOutput("key_indices")
+                                ),
+                            div(style = "padding-left:10px;",
+                                br(),
+                                plotOutput("risk_strat_plot", width = 350, height = 320)),
+                            div(
+                                br(),
                                 htmlOutput("get_return_cat"),
                                 htmlOutput("security_lvl"),
                                 htmlOutput("get_interest")
-                                ),
-                            div()
+                                )
+                            
                       ),
                        wellPanel(
                           htmlOutput("detail_strat")
@@ -661,6 +666,68 @@ server <- function(input,output, session){
     }
   })
   
+  # Tell Users about investment indices 
+  output$intro_indices <- renderText({
+    paste0("<h3>","Key Metrics to Consider:","</h3>")
+  })
+  
+  # Key indices to consider based on user selected investment model 
+  output$key_indices <- renderText({
+    if(input$strategy_button == "Options"){
+      
+    }else if(input$strategy_button == "Day Trading"){
+      
+    }else if(input$strategy_button == "Penny Stocks"){
+      
+    }else if(input$strategy_button == "Value Investing"){
+      
+    }else if(input$strategy_button == "Growth Investing"){
+      
+    }else if(input$strategy_button == "Savings Account"){
+      
+    }else if(input$strategy_button == "CDs"){
+      
+    }else if(input$strategy_button == "Money Market Accounts"){
+      
+    }else if(input$strategy_button == "Short-term Corporate Bonds"){
+      
+    }else if(input$strategy_button == "Dividend Growth Investing"){
+      paste0("<h4><b>", "Dividend Yield: >3%", "</b></h4>", 
+             "<p>","div.price / share price ","</p>",
+             "<h4><b>", "Dividend Growth: positive", "</b></h4>", 
+             "<p>","div.price / time","</p>",
+             "<h4><b>", "P/E Ratio: >20","</b></h4>", 
+             "<p>","share price / earnings ","</p>",
+             "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
+             "<p>","earnings per share / time","</p>",
+             "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+             "<p>","net sales income / time","</p>"
+             )
+    }else if(input$strategy_button == "Indexing / ETFs"){
+      paste0("<h4><b>", "Fees/Expense Ratio: < 1%", "</b></h4>", 
+             "<p>","cost to run fund","</p>",
+             "<h4><b>", "Diversification: High", "</b></h4>", 
+             "<p>","variability of tracked assets","</p>",
+             "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
+             "<p>","earnings per share / time","</p>",
+             "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+             "<p>","net sales income / time","</p>")
+    }else if(input$strategy_button == "Long-term Treasury Bonds"){
+      
+    }else if(input$strategy_button == "Blue Chip Stocks"){
+      paste0("<h4><b>", "Market Cap: >10 billion USD", "</b></h4>", 
+             "<p>","est market size","</p>",
+             "<h4><b>", "Volatility: <3% monthly", "</b></h4>", 
+             "<p>","distribution of returns","</p>",
+             "<h4><b>", "P/E Ratio: >20","</b></h4>", 
+             "<p>","share price / earnings ","</p>",
+             "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
+             "<p>","earnings per share / time","</p>",
+             "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+             "<p>","net sales income / time","</p>")
+    }else{}
+  })
+  
 }
 
 # Launch the shiny application itself 
@@ -673,8 +740,66 @@ shinyApp(ui = ui, server = server)
 # Do not make color change on div income. Continue to make color change on years until you can retire. 
 # Adjust years to income goal to be based on liquidation of 4% of your stocks 
 
+### FinViz Stock Screener API  ###
+library(rvest)
+library(htmltools)
 
-### Dividend Stock Searcher ###
+# Get the number of Pages of data there is available for a particular URL
+get_no_pages <- function(tables){
+  # Get vec of all of the page numbers 
+  page_nos <- as.character(tables[[16]]$X4)
+  # Sub out the word page and get a character vector of all of the page nos
+  a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
+  # Get the number of pages by splitting on / and taking second value in the list 
+  no_pages <- as.numeric(strsplit(a[2], split = "/")[[1]][2])
+  return(no_pages)
+}
+
+# Get all of the data for a URL filter for FinViz.com 
+get_finViz_data <- function(url_val){
+  
+  # Get the first table from base URL page
+  tables <- read_html(url_val) %>% 
+    html_table(fill = TRUE)
+    
+  # Get the number of pages to sweep through 
+  a <- get_no_pages(tables)
+  
+  # Iterate through all URLS and add tables to a list
+  dat <- lapply(
+      # Create URL based on web page number 
+      paste0(url_val, "&r=", 2*(1:a),"1"), 
+      # Read html tables, return the 17th table each time 
+      function(url){
+        tables1 <- read_html(url) %>%
+          html_table(fill = TRUE)
+        return(data.frame(tables1[[17]][-1,]))
+      })
+  
+  # Add first page to list of tables
+  dat[[length(dat)+1]] <- data.frame(tables[[17]][-1,])
+  
+  # Set Column names based on filters in url
+  if(grepl("v=111", url_val)){
+    dat = rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Industry","Sector","Country","Market_Cap","P/E","Share_price","Change","Volume"))
+    dat = dat[order(dat$Ticker),]
+  }else{
+    dat = rbindlist(dat)[,-1]
+  }
+  
+  # Combine first table with all other tables in the dats list 
+  return(dat)
+}
+
+# @TODO: Function to generate a url to use for the get_finviz_data based on user input to your shiny app
+generate_finViz_URL <- function(){}
+
+# Get all stocks that are large cap, on nasdaq exchange and part of s&p 500 index
+a_list <- get_finViz_data("https://www.finviz.com/screener.ashx?v=111&f=cap_large,exch_nasd,idx_sp500")
+
+
+
+### EPS / NET earnings Stock Information Searcher ###
 # Purpose: to generate a viable list of all of the stocks and etfs that pay dividends. This list will then be created into a dataframe 
 # by searching for more information about the shares such as what their dividend yield is, what their dividend growth has been like (5yr, 10yr, 20yr),
 # how often they pay dividends, and the volatility of the stock as a whole. This information will be captured in a dataframe and filtered to meet the 
@@ -1318,6 +1443,16 @@ fig <- fig %>%
   )
 
 fig
+
+# Quandl Datatable 
+library(Quandl)
+q_api_key <- "N-Yrjym9xQS8iGyHZyx9" #QUandl API key 
+Quandl.api_key(q_api_key)
+# tickers_select = c('AAPL','JPM')
+data <- Quandl.datatable("SHARADAR/SF1") 
+#                          calendardate.gte = start_date, 
+#                          ticker = tickers_select, 
+#                          qopts.columns=c('ticker', 'calendardate', 'netinc', 'divyield', 'ncfdiv', 'eps', 'pe', 'revenue'))
 
 ### --------------------------------- Depricated Code -------------------------------- ###
 

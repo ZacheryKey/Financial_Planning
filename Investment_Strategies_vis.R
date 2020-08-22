@@ -270,14 +270,22 @@ ui<-fluidPage(
                        div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("pref")),
                        div(style = "padding-left:10px;",radioButtons(inputId = "strategy_button", label = NULL, choices = c("Penny Stocks","Options"), inline = TRUE)),
                        splitLayout(
-                         cellWidths = c("30%","50%","20%"),
+                         cellWidths = c("9%","27%","9%","37%","18%"),
                             div(
-                                br(),
-                                htmlOutput("key_indices")
-                                ),
+                              style = "writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; overflow: visible; vertical-align: center; padding-bottom: 30px;",
+                              htmlOutput("get_metric")
+                            ),
+                            div(
+                              br(),
+                              htmlOutput("key_indices", style = "vertical-align:middle;")
+                            ),
+                            div(
+                              style = "writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; display: inline-block; overflow: visible; vertical-align: center; padding-bottom: 30px;",
+                              htmlOutput("get_risk")
+                            ),
                             div(style = "padding-left:10px;",
                                 br(),
-                                plotOutput("risk_strat_plot", width = 350, height = 320)),
+                                plotOutput("risk_strat_plot", width = 380, height = 320)),
                             div(
                                 br(),
                                 htmlOutput("get_return_cat"),
@@ -291,7 +299,18 @@ ui<-fluidPage(
                        )
                      )
               ),
-            tabPanel(title = "Selecting Investments"),
+            tabPanel(title = "Selecting Investments",
+                column(3,
+                     wellPanel(
+                       selectInput(inputId = "select_sector", label = "Select Sector", choices = c("All","Consumer Goods","Communications","Energy","Financial","Healthcare","Industrials","Materials","Real Estate","Technology","Utilities")),
+                       #selectInput(inputId = "select_industry", label = "Select Industry", choices = c("NA"))
+                       selectInput(inputId = "select_strategy", label = "Select Strategy", choices = c("Blue Chip Stocks","Index Funds/ETFs","Dividend Growth Investing","Income Investing","Growth Investing","Value Investing","Day Trading","Options","Penny Stocks"))
+                     )
+                ), 
+                column(9,
+                       
+                )
+              ),
             tabPanel(title = "My Investments",
                          wellPanel(h4("Record New Investments")),
                          wellPanel(h4("Check Existing Investments"))
@@ -299,7 +318,6 @@ ui<-fluidPage(
     )
   )
 )
-
 
 server <- function(input,output, session){
   
@@ -627,7 +645,7 @@ server <- function(input,output, session){
     
     if(!is.na(interest_rate)){
         paste0("<h2><b>","<font color=\"#FFD000\">", 100*interest_rate, "%", "</font>","</b></h2>", 
-                  "<h5>", "avg. annual return", "</h5>")
+                  "<h5>", "mean annual return", "</h5>")
     }else{
       paste0("<h2><b>","<font color=\"#FFD000\">", ">15%", "</font>","</b></h2>", 
              "<h5>", "expected annual return", "</h5>")
@@ -638,15 +656,15 @@ server <- function(input,output, session){
     compare_types <- get_col()
     return_rate <- as.numeric(compare_types[which(compare_types$investment_types == input$strategy_button),3])
     if(0<return_rate & return_rate<=1){
-         paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+         paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "management level", "</h5>")
     }else if(1<return_rate & return_rate<=2){
-        paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "management level", "</h5>")
     }else if(2<return_rate & return_rate<=3){
-        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "management level", "</h5>")
     }else if(3<return_rate & return_rate<=4){
-        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+        paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "management level", "</h5>")
     }else{
-        paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "invest. management", "</h5>")
+        paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "management level", "</h5>")
     }
   })
   
@@ -654,15 +672,15 @@ server <- function(input,output, session){
     compare_types <- get_col()
     risk_rate <- as.numeric(compare_types[which(compare_types$investment_types == input$strategy_button),4])
     if(0<risk_rate & risk_rate<=1){
-      paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Low", "</font>","</b></h2>", "<h5>", "investment risk", "</h5>")
     }else if(1<risk_rate & risk_rate<=2){
-      paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Low-Mid", "</font>","</b></h2>", "<h5>", "investment risk", "</h5>")
     }else if(2<risk_rate & risk_rate<=3){
-      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-Range", "</font>","</b></h2>", "<h5>", "investment risk", "</h5>")
     }else if(3<risk_rate & risk_rate<=4){
-      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "invest. risk level", "</h5>")
+      paste0("<h2><b>","<font color=\"#FFD000\">", "Mid-High", "</font>","</b></h2>", "<h5>", "investment risk", "</h5>")
     }else{
-      paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "invest. risk  level", "</h5>")
+      paste0("<h2><b>","<font color=\"#FFD000\">", "High", "</font>","</b></h2>", "<h5>", "investment risk", "</h5>")
     }
   })
   
@@ -674,29 +692,72 @@ server <- function(input,output, session){
   # Key indices to consider based on user selected investment model 
   output$key_indices <- renderText({
     if(input$strategy_button == "Options"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "Day Trading"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "Penny Stocks"){
-      
+      paste0(
+        "<h4><b>", "Market Cap: < 500 million", "</b></h4>", 
+        "<p>","estimated market share","</p>",
+        "<h4><b>", "Volatility: high", "</b></h4>", 
+        "<p>","difference in price / time","</p>",
+        "<h4><b>", "Debt to Equity Ratio: < .3","</b></h4>", 
+        "<p>","market price / earnings ","</p>",
+        "<h4><b>", "Growth Shares Outstanding: low" ,"</b></h4>",
+        "<p>","total number of shares / time","</p>",
+        "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+        "<p>","net sales income / time","</p>"
+      )
     }else if(input$strategy_button == "Value Investing"){
-      
+      paste0(
+               "<h4><b>", "P/B Ratio: < 1", "</b></h4>", 
+               "<p>","market price / book value","</p>",
+               "<h4><b>", "D/E Ratio: < 1", "</b></h4>", 
+               "<p>","total debt / total equity","</p>",
+               "<h4><b>", "P/E Ratio: lowest 10% in sector","</b></h4>", 
+               "<p>","market price / earnings ","</p>",
+               "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
+               "<p>","earnings per share / time","</p>",
+               "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+               "<p>","net sales income / time","</p>"
+      )
     }else if(input$strategy_button == "Growth Investing"){
-      
+      paste0(
+               "<h4><b>", "Profit Margin: > past 5 yrs", "</b></h4>", 
+               "<p>","(income - expenses) / sales","</p>",
+               "<h4><b>", "Return on Equity: increasing yearly", "</b></h4>", 
+               "<p>","net income / shareholder equity","</p>",
+               "<h4><b>", "Future EPS Growth: >15%" ,"</b></h4>",
+               "<p>","earnings per share / time","</p>",
+               "<h4><b>", "Past Sales Growth: >10%" ,"</b></h4>",
+               "<p>","net sales income / time","</p>"
+      )
     }else if(input$strategy_button == "Savings Account"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "CDs"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "Money Market Accounts"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "Short-term Corporate Bonds"){
-      
+      paste0(
+        
+      )
     }else if(input$strategy_button == "Dividend Growth Investing"){
       paste0("<h4><b>", "Dividend Yield: >3%", "</b></h4>", 
              "<p>","div.price / share price ","</p>",
-             "<h4><b>", "Dividend Growth: positive", "</b></h4>", 
-             "<p>","div.price / time","</p>",
-             "<h4><b>", "P/E Ratio: >20","</b></h4>", 
+             "<h4><b>", "Payout Ratio: <70%", "</b></h4>", 
+             "<p>","total earnings / dividends paid","</p>",
+             "<h4><b>", "P/E Ratio: <20","</b></h4>", 
              "<p>","share price / earnings ","</p>",
              "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
              "<p>","earnings per share / time","</p>",
@@ -710,16 +771,23 @@ server <- function(input,output, session){
              "<p>","variability of tracked assets","</p>",
              "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
              "<p>","earnings per share / time","</p>",
-             "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
-             "<p>","net sales income / time","</p>")
+             "<h4><b>", "Sector Growth: positive" ,"</b></h4>",
+             "<p>","sector value / time","</p>"
+             )
     }else if(input$strategy_button == "Long-term Treasury Bonds"){
-      
+      paste0("<h4><b>", "Adjusted Return: positive", "</b></h4>", 
+             "<p>","annual bond return less inflation","</p>",
+             "<h4><b>", "Yield: >2.0%", "</b></h4>", 
+             "<p>","annual return of bond","</p>",
+             "<h4><b>", "Maturity Period: >10 years" ,"</b></h4>",
+             "<p>","time for bond to reach full value","</p>"
+            )
     }else if(input$strategy_button == "Blue Chip Stocks"){
       paste0("<h4><b>", "Market Cap: >10 billion USD", "</b></h4>", 
              "<p>","est market size","</p>",
              "<h4><b>", "Volatility: <3% monthly", "</b></h4>", 
              "<p>","distribution of returns","</p>",
-             "<h4><b>", "P/E Ratio: >20","</b></h4>", 
+             "<h4><b>", "P/E Ratio: <20","</b></h4>", 
              "<p>","share price / earnings ","</p>",
              "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
              "<p>","earnings per share / time","</p>",
@@ -728,11 +796,49 @@ server <- function(input,output, session){
     }else{}
   })
   
+  ####################################
+  ##### Investment Selection Tab #####
+  ####################################
+  # 
+  # observeEvent(input$select_sector,{
+  #   
+  #   if(input$select_sector == "Materials"){
+  #     choiceVec <- c("Agriculture","Aluminum","Building Materials","Chemicals","Coking Coal","Copper","Gold","Lumber","Industrial Metals","Precious Metals","Paper","Silver","Chemicals", "Steel")
+  #   }else if(input$select_sector == "Consumer Goods"){
+  #     choiceVec <- c("Apparel","")
+  #   }else if(input$select_sector == "Communications"){
+  #     choiceVec <- c("Advertising","Broadcasting","Gaming","Entertainment","Internet","Publishing","Telecom")
+  #   }else if(input$select_sector == "Energy"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Financial"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Healthcare"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Industrials"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Real Estate"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Technology"){
+  #     choiceVec <- c("")
+  #   }else if(input$select_sector == "Utilities"){
+  #     choiceVec <- c("")
+  #   }else{
+  #     choiceVec <- c("")
+  #   }
+  #   
+  #   updateSelectInput(session = session, inputId = "select_industry", choices = choiceVec)
+  # })
+  
+  output$get_metric<-renderText({
+    paste0("<h2><u>","Metrics & Goals","</h2></u>")
+  })
+  
+  output$get_risk <- renderText({
+    paste0("<h2><u>","Risk & Return","</h2></u>")
+  })
 }
 
-# Launch the shiny application itself 
 shinyApp(ui = ui, server = server)
-
 
 
 # More information in the model: 

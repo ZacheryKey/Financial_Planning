@@ -29,6 +29,7 @@ library(xlsx)
 library(XML)
 library(stringr)
 library(rvest)
+library(htmltools)
 library(plyr)
 library(tibble)
 library(stringi)
@@ -36,16 +37,7 @@ library(rlang)
 library(tibble)
 
 
-# require(devtools)
-# install_github('ramnathv/rCharts')
-# ?install_github
-# @TODO: Adjust Div model to include col that has 4% of total investment value 
-# setwd("C:/Users/YOUR_REPO_HERE")
-# ex <- div_growth_invest(50, 50000, 25000, .025, .1, 1.02, .03, 1.02, 15, TRUE)
-
-
-
-### ---------------------------------------- Dividend Growth Investments ---------------------------------------------###
+### ---------------------------------------- Investments Helper Functions ---------------------------------------------###
 
 # CONSTANT SHARE PRICE, CONSTANT DIVIDEND GROWTH RATE, CONSTANT DRIP, LOW VOLATILITY, Price averaging investment function
 # given a number of years, the inflation rate, yearly income, percentage of income invested, the expected annual growth of a dividend, 
@@ -188,6 +180,72 @@ plot_strat <-function(data_vals){
   return(strat_plot)
 }
 
+# Create a dataframe for the preset filters to get people started using the app. This dataframe will be added onto reactively whenever someone 
+# uses the add or delete feature in the filters box
+filter_presets <- c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing","Dow Jones","S&P 500")
+filter_URLs <- c("https://www.finviz.com/screener.ashx?v=111&f=cap_largeover,fa_eps5years_pos,fa_estltgrowth_pos&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=111&f=fa_div_o3,fa_estltgrowth_pos,fa_payoutratio_u70,fa_sales5years_pos&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=111&f=fa_estltgrowth_o15,fa_netmargin_pos,fa_roe_pos,fa_sales5years_o10&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=151&f=ind_exchangetradedfund&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=151&f=cap_microunder,fa_debteq_u0.3,fa_sales5years_pos,sh_price_u10,sh_relvol_u1,ta_volatility_wo5&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=151&f=fa_debteq_u1,fa_estltgrowth_pos,fa_pb_u1,fa_sales5years_pos&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=111&f=idx_dji&ft=4"
+                ,"https://www.finviz.com/screener.ashx?v=111&f=idx_sp500&ft=4"
+                )
+filter_descriptions <- c(
+                 "Large Cap, Positive Future Growth, Positive Past Growth"
+                ,"Dividend Yield > 3%, Payout Ratio < 70%, Positive Future Growth"
+                ,">15% EPS Future Growth, positive net margin, positive return on equity"
+                ,"Exchange-Traded-Fund"
+                ,"Under 300 million market cap, <.3 debt-equity, under $10 per share, high weekly volatility, low relative shares outstanding"
+                ,"Low Price-Book ratio, debt-equity <1, positive sales growth, future positive eps growth"
+                ,"Top 30 industry performers in US"
+                ,"Top 500 market caps in US"
+                )
+preset_filters <- data.frame(filter_presets, filter_URLs, filter_descriptions, stringsAsFactors = FALSE)
+
+# Get the number of Pages of data there is available for a particular URL
+get_no_pages <- function(tables){
+  # Get vec of all of the page numbers 
+  page_nos <- as.character(tables[[18]]$X4)
+  # Sub out the word page and get a character vector of all of the page nos
+  a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
+  # Get the number of pages by splitting on / and taking second value in the list 
+  no_pages <- as.numeric(strsplit(a[2], split = "/")[[1]][2])
+  return(no_pages)
+}
+
+# Get all of the data for a URL filter for FinViz.com 
+get_finViz_data <- function(url_val){
+  # Get the first table from base URL page
+  tables <- read_html(url_val) %>% 
+    html_table(fill = TRUE)
+  # Get the number of pages to sweep through 
+  a <- get_no_pages(tables)
+  # Iterate through all URLS and add tables to a list
+  dat <- lapply(
+    # Create URL based on web page number 
+    paste0(url_val, "&r=", 2*(1:a),"1"), 
+    # Read html tables, return the 17th table each time 
+    function(url){
+      tables1 <- read_html(url) %>%
+        html_table(fill = TRUE)
+      return(data.frame(tables1[[19]][-1,]))
+    })
+  # Add first page to list of tables
+  dat[[length(dat)+1]] <- data.frame(tables[[19]][-1,])
+  # Set Column names based on filters in url
+  if(grepl("v=111", url_val)){
+    dat = rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Industry","Sector","Country","Market_Cap","P/E","Share_price","Change","Volume"))
+    dat = dat[order(dat$Ticker),]
+  }else{
+    dat = rbindlist(dat)[,-1]
+  }
+  # Combine first table with all other tables in the dats list 
+  return(dat)
+}
+
+
 # Create your shiny app User inferface to allow user to play around with the different variables in dividend growth investing 
 ui<-fluidPage(
     sidebarPanel(
@@ -262,13 +320,13 @@ ui<-fluidPage(
                      wellPanel(
                        div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("priority_title")),
                        div(style="display:inline-block; vertical-align: top; padding-left: 10px; width:275px;", htmlOutput("val_menu_txt1")),
-                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", selectInput(inputId = "val_menu1", label = NULL, choices = c("high return","high safety margin"))),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", selectInput(inputId = "val_menu1", label = NULL, choices = c("high safety margin","high return"))),
                        div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:170px;", htmlOutput("val_menu_txt4")),
-                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:120px;", selectInput(inputId = "val_menu3", label = NULL, choices = c("short term","long term"))),
+                       div(style="display:inline-block; vertical-align: top; padding-left: 5px; width:120px;", selectInput(inputId = "val_menu3", label = NULL, choices = c("long term","short term"))),
                        div(style="line-height:100%; border: 1px; margin: 1px; padding-left: 10px; padding-top: 1px;", htmlOutput("get_strategies")),
                        br(),
                        div(style="line-height:100%; border: 1px; margin: 1px; padding-top: 1px;", htmlOutput("pref")),
-                       div(style = "padding-left:10px;",radioButtons(inputId = "strategy_button", label = NULL, choices = c("Penny Stocks","Options"), inline = TRUE)),
+                       div(style = "padding-left:10px;",radioButtons(inputId = "strategy_button", label = NULL, choices = c("Dividend Growth Investing","Indexing / ETFs","Long-term Treasury Bonds","Blue Chip Stocks"), inline = TRUE)),
                        splitLayout(
                          cellWidths = c("9%","27%","9%","37%","18%"),
                             div(
@@ -302,12 +360,20 @@ ui<-fluidPage(
             tabPanel(title = "Selecting Investments",
                 column(3,
                      wellPanel(
-                       selectInput(inputId = "select_sector", label = "Select Sector", choices = c("All","Consumer Goods","Communications","Energy","Financial","Healthcare","Industrials","Materials","Real Estate","Technology","Utilities")),
-                       #selectInput(inputId = "select_industry", label = "Select Industry", choices = c("NA"))
-                       selectInput(inputId = "select_strategy", label = "Select Strategy", choices = c("Blue Chip Stocks","Index Funds/ETFs","Dividend Growth Investing","Income Investing","Growth Investing","Value Investing","Day Trading","Options","Penny Stocks"))
+                       selectInput(inputId = "select_strategy", label = "Select Filter", choices = c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing"))
                      )
                 ), 
                 column(9,
+                     wellPanel(
+                        splitLayout(cellWidths = c("20%","50%","30%"),
+                           textInput(inputId = "filter_name", label = "Name"),
+                           textInput(inputId = "filter_URL", label = "URL"),
+                           textInput(inputId = "filter_description", label = "Description")
+                        ),
+                        div(style = "display:inline-block;", actionButton(inputId = "new_filter", label = "Add")),
+                        #div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "edit_filter", label = "Edit")),
+                        div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "delete_filter", label = "Delete"))
+                      )
                        
                 )
               ),
@@ -318,6 +384,7 @@ ui<-fluidPage(
     )
   )
 )
+
 
 server <- function(input,output, session){
   
@@ -529,14 +596,14 @@ server <- function(input,output, session){
     }else if(input$strategy_button == "Value Investing"){
       paste0("<h3>","Value Investing","</h3>",
              "<p>","<b>","Description:","</b>"," Value Investors look to purchase good stocks at a discounted price in order to recieve a larger return in the future. ","</p>",
-             "<p>","<b>","Benefits: ","</b>"," Value investing has the ability to provide investors with a substantial amount of wealth over the long run. Value investing in good quality large companies during a recession will allow you to get stock 'on sale'.","</p>",
+             "<p>","<b>","Benefits: ","</b>"," Value investing has the ability to provide investors with a substantial amount of wealth over the long run. Value investing in good quality large companies during a recession will allow you to get stock 'on sale'. Value investors typically look for undervalued stock that is trading for 2/3 or less of the 'true value' of the stock, providing a hedge against risk with the longterm-goal of appreciating to reach full valuation.","</p>",
              "<p>","<b>","Risks: ","</b>"," The single largest risk with value investing is correctly determining which companies will be able to recover from a financial setback. This means that value investors should be prepared to spend a decent amount of time determining a company's eligibility by their financial statements. ",
              "Investing in a 'value' stock that continues downward can greatly decrease investment value.","</p>")
     }else if(input$strategy_button == "Growth Investing"){
       paste0("<h3>","Growth Investing","</h3>",
              "<p>","<b>","Description:","</b>"," Growth Investors look to purchase stocks from growing companies that are expected to greatly increase in value over the term of investment.","</p>",
              "<p>","<b>","Benefits: ","</b>"," Growth investing can result in high returns on companies that are moving into new market sectors or have introduced new and useful technologies. Investing in a company's IPO (initial public offering, or when a company first decides to sell stock to the public) is an example of growth investing.","</p>",
-             "<p>","<b>","Risks: ","</b>"," Risks in growth investing include over-speculation on a company's performance, high volatility, and over-valuation for relatively young organizations. Many Companies may look appealing on paper or in theory, but because growth stocks are composed of younger companies they are more volatile than other more established organizations. Most Growth stocks do not pay dividends as the focus of the compnay is on increasing total company value instead of creating shareholder value.","</p>")
+             "<p>","<b>","Risks: ","</b>"," Risks in growth investing include over-speculation on a company's performance, high volatility, and over-valuation for relatively young organizations. Many Companies may look appealing on paper or in theory, but because growth stocks are composed of younger companies they are more volatile than other more established organizations. Most Growth stocks do not pay dividends as the focus of the company is on increasing total company value instead of creating shareholder value.","</p>")
     }else if(input$strategy_button == "Savings Account"){
       paste0("<h3>","Savings Account","</h3>",
              "<p>","<b>","Description:","</b>"," Placing your money in a bank or related finacial institution with relatively low interest rates, minimal risk and high liquidity.","</p>",
@@ -684,20 +751,27 @@ server <- function(input,output, session){
     }
   })
   
-  # Tell Users about investment indices 
-  output$intro_indices <- renderText({
-    paste0("<h3>","Key Metrics to Consider:","</h3>")
+  output$get_metric<-renderText({
+    paste0("<h2><u>","Metrics & Goals","</h2></u>")
+  })
+  
+  output$get_risk <- renderText({
+    paste0("<h2><u>","Risk & Return","</h2></u>")
   })
   
   # Key indices to consider based on user selected investment model 
   output$key_indices <- renderText({
     if(input$strategy_button == "Options"){
       paste0(
-        
+        "<h4><b>", "Volatility: high/writing, low/buying", "</b></h4>", 
+        "<p>","difference in price / time","</p>"
       )
     }else if(input$strategy_button == "Day Trading"){
       paste0(
-        
+        "<h4><b>", "Bid/Ask Spread: higher than normal", "</b></h4>", 
+        "<p>","difference between bid and ask","</p>",
+        "<h4><b>", "Volatility: high", "</b></h4>", 
+        "<p>","difference in price / time","</p>"
       )
     }else if(input$strategy_button == "Penny Stocks"){
       paste0(
@@ -714,43 +788,69 @@ server <- function(input,output, session){
       )
     }else if(input$strategy_button == "Value Investing"){
       paste0(
-               "<h4><b>", "P/B Ratio: < 1", "</b></h4>", 
-               "<p>","market price / book value","</p>",
-               "<h4><b>", "D/E Ratio: < 1", "</b></h4>", 
-               "<p>","total debt / total equity","</p>",
-               "<h4><b>", "P/E Ratio: lowest 10% in sector","</b></h4>", 
-               "<p>","market price / earnings ","</p>",
-               "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
-               "<p>","earnings per share / time","</p>",
-               "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
-               "<p>","net sales income / time","</p>"
+        "<h4><b>", "P/B Ratio: < 1", "</b></h4>", 
+        "<p>","market price / book value","</p>",
+        "<h4><b>", "D/E Ratio: < 1", "</b></h4>", 
+        "<p>","total debt / total equity","</p>",
+        "<h4><b>", "P/E Ratio: lowest 10% in sector","</b></h4>", 
+        "<p>","market price / earnings ","</p>",
+        "<h4><b>", "EPS Growth: positive" ,"</b></h4>",
+        "<p>","earnings per share / time","</p>",
+        "<h4><b>", "Sales Growth: positive" ,"</b></h4>",
+        "<p>","net sales income / time","</p>"
       )
     }else if(input$strategy_button == "Growth Investing"){
       paste0(
-               "<h4><b>", "Profit Margin: > past 5 yrs", "</b></h4>", 
-               "<p>","(income - expenses) / sales","</p>",
-               "<h4><b>", "Return on Equity: increasing yearly", "</b></h4>", 
-               "<p>","net income / shareholder equity","</p>",
-               "<h4><b>", "Future EPS Growth: >15%" ,"</b></h4>",
-               "<p>","earnings per share / time","</p>",
-               "<h4><b>", "Past Sales Growth: >10%" ,"</b></h4>",
-               "<p>","net sales income / time","</p>"
+       "<h4><b>", "Profit Margin: > past 5 yrs", "</b></h4>", 
+        "<p>","(income - expenses) / sales","</p>",
+        "<h4><b>", "Return on Equity: increasing yearly", "</b></h4>", 
+        "<p>","net income / shareholder equity","</p>",
+        "<h4><b>", "Future EPS Growth: >15%" ,"</b></h4>",
+        "<p>","earnings per share / time","</p>",
+        "<h4><b>", "Past EPS Growth: >10%" ,"</b></h4>",
+        "<p>","earnings per share / time","</p>",
+        "<h4><b>", "Past Sales Growth: >10%" ,"</b></h4>",
+        "<p>","net sales / time","</p>"
       )
     }else if(input$strategy_button == "Savings Account"){
       paste0(
-        
+        "<h4><b>", "Interest Rates: highest possible", "</b></h4>", 
+        "<p>","capital growth rate","</p>",
+        "<h4><b>", "Monthly Fees: none", "</b></h4>", 
+        "<p>","cost to hold account","</p>",
+        "<h4><b>", "Transfers: automatic","</b></h4>", 
+        "<p>","automate deposits","</p>",
+        "<h4><b>", "Minimum Deposit: none" ,"</b></h4>",
+        "<p>","least amount of money to open account","</p>"
       )
     }else if(input$strategy_button == "CDs"){
       paste0(
-        
+        "<h4><b>", "Annual Yield: > .4%", "</b></h4>", 
+        "<p>","annual growth rate","</p>",
+        "<h4><b>", "Capital Insurance: yes", "</b></h4>", 
+        "<p>","protection for principal","</p>",
+        "<h4><b>", "Withdrawal Penalty: minimal","</b></h4>", 
+        "<p>","cost of withdrawing prior to maturity","</p>",
+        "<h4><b>", "Future Growth: yes" ,"</b></h4>",
+        "<p>","expanding annual yield","</p>"
       )
     }else if(input$strategy_button == "Money Market Accounts"){
       paste0(
-        
+        "<h4><b>", "Interest Rates: highest possible", "</b></h4>", 
+        "<p>","capital growth rate","</p>",
+        "<h4><b>", "Monthly Fees: none", "</b></h4>", 
+        "<p>","cost to hold account","</p>",
+        "<h4><b>", "Transfers: automatic","</b></h4>", 
+        "<p>","automate deposits","</p>",
+        "<h4><b>", "Minimum Deposit: none" ,"</b></h4>",
+        "<p>","least amount of money to open account","</p>"
       )
     }else if(input$strategy_button == "Short-term Corporate Bonds"){
       paste0(
-        
+        "<h4><b>", "Annual Yield: > 2%", "</b></h4>", 
+        "<p>","annual growth rate","</p>",
+        "<h4><b>", "Expense Ratio: < .5%", "</b></h4>", 
+        "<p>","cost to have an account","</p>"
       )
     }else if(input$strategy_button == "Dividend Growth Investing"){
       paste0("<h4><b>", "Dividend Yield: >3%", "</b></h4>", 
@@ -799,46 +899,12 @@ server <- function(input,output, session){
   ####################################
   ##### Investment Selection Tab #####
   ####################################
-  # 
-  # observeEvent(input$select_sector,{
-  #   
-  #   if(input$select_sector == "Materials"){
-  #     choiceVec <- c("Agriculture","Aluminum","Building Materials","Chemicals","Coking Coal","Copper","Gold","Lumber","Industrial Metals","Precious Metals","Paper","Silver","Chemicals", "Steel")
-  #   }else if(input$select_sector == "Consumer Goods"){
-  #     choiceVec <- c("Apparel","")
-  #   }else if(input$select_sector == "Communications"){
-  #     choiceVec <- c("Advertising","Broadcasting","Gaming","Entertainment","Internet","Publishing","Telecom")
-  #   }else if(input$select_sector == "Energy"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Financial"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Healthcare"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Industrials"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Real Estate"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Technology"){
-  #     choiceVec <- c("")
-  #   }else if(input$select_sector == "Utilities"){
-  #     choiceVec <- c("")
-  #   }else{
-  #     choiceVec <- c("")
-  #   }
-  #   
-  #   updateSelectInput(session = session, inputId = "select_industry", choices = choiceVec)
-  # })
   
-  output$get_metric<-renderText({
-    paste0("<h2><u>","Metrics & Goals","</h2></u>")
-  })
   
-  output$get_risk <- renderText({
-    paste0("<h2><u>","Risk & Return","</h2></u>")
-  })
 }
 
 shinyApp(ui = ui, server = server)
+
 
 
 # More information in the model: 
@@ -847,13 +913,12 @@ shinyApp(ui = ui, server = server)
 # Adjust years to income goal to be based on liquidation of 4% of your stocks 
 
 ### FinViz Stock Screener API  ###
-library(rvest)
-library(htmltools)
+
 
 # Get the number of Pages of data there is available for a particular URL
 get_no_pages <- function(tables){
   # Get vec of all of the page numbers 
-  page_nos <- as.character(tables[[16]]$X4)
+  page_nos <- as.character(tables[[18]]$X4)
   # Sub out the word page and get a character vector of all of the page nos
   a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
   # Get the number of pages by splitting on / and taking second value in the list 
@@ -863,7 +928,7 @@ get_no_pages <- function(tables){
 
 # Get all of the data for a URL filter for FinViz.com 
 get_finViz_data <- function(url_val){
-  
+   
   # Get the first table from base URL page
   tables <- read_html(url_val) %>% 
     html_table(fill = TRUE)
@@ -879,11 +944,11 @@ get_finViz_data <- function(url_val){
       function(url){
         tables1 <- read_html(url) %>%
           html_table(fill = TRUE)
-        return(data.frame(tables1[[17]][-1,]))
+        return(data.frame(tables1[[19]][-1,]))
       })
   
   # Add first page to list of tables
-  dat[[length(dat)+1]] <- data.frame(tables[[17]][-1,])
+  dat[[length(dat)+1]] <- data.frame(tables[[19]][-1,])
   
   # Set Column names based on filters in url
   if(grepl("v=111", url_val)){
@@ -897,12 +962,8 @@ get_finViz_data <- function(url_val){
   return(dat)
 }
 
-# @TODO: Function to generate a url to use for the get_finviz_data based on user input to your shiny app
-generate_finViz_URL <- function(){}
-
-# Get all stocks that are large cap, on nasdaq exchange and part of s&p 500 index
-a_list <- get_finViz_data("https://www.finviz.com/screener.ashx?v=111&f=cap_large,exch_nasd,idx_sp500")
-
+blue_chips <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Blue Chip Stocks"), which(colnames(preset_filters)=="filter_URLs")])
+div_growths <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Dividend Growth Investing"), which(colnames(preset_filters)=="filter_URLs")])
 
 
 ### EPS / NET earnings Stock Information Searcher ###
@@ -2147,3 +2208,246 @@ data <- Quandl.datatable("SHARADAR/SF1")
 #     
 #   }else{}
 # })
+
+# 
+# # Get all of the key indicators corresponding to the investment method you are choosing
+# output$get_indicators <- renderUI({
+#   
+#   if(input$select_strategy == "Blue Chip Stocks"){
+#     # Market Cap, Volatility, P/E, EPS Growth Future, Sales Growth 
+#     tagList(
+#       selectInput(inputId = "market_cap", label = "Market Cap", choices = c("Any","Micro (less than 300 mln)","Small (300 mln - 2 bln)","Mid (2-10 bln)","Large (10-200 bln)","Mega (200+ bln)")),
+#       selectInput(inputId = "volatility", label = "Monthly Volatility", choices = c("Any",">2%",">3%",">4%",">5%",">6%",">8%",">10%",">12%",">15%")),
+#       selectInput(inputId = "price_equity", label = "P/E Ratio", choices = c("Any","<5","<10","<15","<20","<30","<40","<50",">50")),
+#       selectInput(inputId = "eps_growth_future", label = "Next 5 years EPS Growth", choices = c("Any", "Negative (<0%)", "Positive (>0%)", "0-10%", ">25%")),
+#       selectInput(inputId = "sales_growth", label = "Past 5 years Sales Growth", choices = c("Any","Negative (<0%)","Positive (>0%)","0-10%",">25%"))
+#     )
+#   }else if(input$select_strategy == "Dividend Growth Investing"){
+#     # Dividend Yield, Payout Ratio, P/E, Sales Growth, EPS Growth 
+#     tagList(
+#       selectInput(inputId = "div_yield", label = "Annual Dividend Yield", choices = c("Any","None","Positive (>0%)","High (>5%)","Very High (>10%)")),
+#       selectInput(inputId = "payout_ratio", "Dividend Payout Ratio", choices = c("Any","<100%","<90%","<80%","<70%","<60%","<50%","<40%","<30%","<20%","<10%")),
+#       selectInput(inputId = "price_equity", label = "P/E Ratio", choices = c("Any","<5","<10","<15","<20","<30","<40","<50",">50")),
+#       selectInput(inputId = "sales_growth", label = "Past 5 years Sales Growth", choices = c("Any","Negative (<0%)","Positive (>0%)","0-10%",">25%")),
+#       selectInput(inputId = "eps_growth_future", label = "Next 5 years EPS Growth", choices = c("Any", "Negative (<0%)", "Positive (>0%)", "0-10%", ">25%"))
+#     )
+#   }else if(input$select_strategy == "Growth Investing"){
+#     # Profit Margin, Return on Equity, Future EPS Growth, Past EPS Growth  
+#     tagList(
+#       selectInput(inputId = "profit_margin", "Net Profit Margin", choices = c("Any","Very Negative (<-20%)","Negative (<0%)","Positive (>0%)","Very Positive (>20%)")),
+#       selectInput(inputId = "return_equity", "Return on Equity", choices = c("Any", "Very Negative","Negative","Positive","Very Positive")),
+#       selectInput(inputId = "eps_growth_future", label = "Next 5 years EPS Growth", choices = c("Any", "Negative (<0%)", "Positive (>0%)", "0-10%", ">25%")),
+#       selectInput(inputId = "eps_growth_past", label = "Past 5 years EPS Growth", choices = c("Any", "Negative (<0%)","Positve (>0%)","High (>10%)","Very High (>25%)"))
+#     )
+#   }else if(input$select_strategy == "Index Funds/ETFs"){
+#     # Expense Ratio, Diversification, EPS growth, Sector Growth // Automatically set screen to only view etfs 
+#     tagList(
+#       
+#     )
+#   }else if(input$select_strategy == "Penny Stocks"){
+#     # Market Cap, Volatility, D/E Ratio, Growth of Shares Outstanding, Sales Growth 
+#     tagList(
+#       selectInput(inputId = "market_cap", label = "Market Cap", choices = c("Any","Micro (less than 300 mln)","Small (300 mln - 2 bln)","Mid (2-10 bln)","Large (10-200 bln)","Mega (200+ bln)")),
+#       selectInput(inputId = "volatility", label = "Monthly Volatility", choices = c("Any",">2%",">3%",">4%",">5%",">6%",">8%",">10%",">12%",">15%")),
+#       selectInput(inputId = "debt_equity", label = "Debt/Equity Ratio", choices = c("Any", "<1.0","<.8","<.6","<.5","<.4","<.3","<.2","<.1")),
+#       selectInput(inputId = "sales_growth", label = "Past 5 years Sales Growth", choices = c("Any","Negative (<0%)","Positive (>0%)","0-10%",">25%"))
+#     )
+#   }else if(input$select_strategy == "Value Investing"){
+#     # Price/Book Ratio, Debt/Equity Ratio, P/E Ratio, EPS Growth, Sales Growth 
+#     tagList(
+#       selectInput(inputId = "price_book", "Price/Book Ratio", choices = c("Any","Low (<1)","High (>5)")),
+#       selectInput(inputId = "debt_equity", label = "Debt/Equity Ratio", choices = c("Any", "<1.0","<.8","<.6","<.5","<.4","<.3","<.2","<.1")),
+#       selectInput(inputId = "price_equity", label = "P/E Ratio", choices = c("Any","<5","<10","<15","<20","<30","<40","<50",">50")),
+#       selectInput(inputId = "eps_growth_future", label = "Next 5 years EPS Growth", choices = c("Any", "Negative (<0%)", "Positive (>0%)", "0-10%", ">25%")),
+#       selectInput(inputId = "sales_growth", label = "Past 5 years Sales Growth", choices = c("Any","Negative (<0%)","Positive (>0%)","0-10%",">25%"))
+#     )
+#   }else if(input$select_strategy == "Any"){
+#     # Market Cap, Volatility, P/E, P/B, D/E, Sales Growth, EPS Growth, Profit Margin, 
+#     # Future EPS Growth, Past EPS Growth, Dividend Yield, Payout Ratio, Sector Growth, Growth of Shares Outstanding
+#     tagList(
+#       selectInput(inputId = "debt_equity", label = "Debt/Equity Ratio", choices = c("Any", "<1.0","<.8","<.6","<.5","<.4","<.3","<.2","<.1")),
+#       selectInput(inputId = "div_yield", label = "Annual Dividend Yield", choices = c("Any","None","Positive (>0%)","High (>5%)","Very High (>10%)")),
+#       selectInput(inputId = "eps_growth_future", label = "Next 5 years EPS Growth", choices = c("Any", "Negative (<0%)","Positive (>0%)","Low (<10%)","Very High (>25%)")),
+#       selectInput(inputId = "eps_growth_past", label = "Past 5 years EPS Growth", choices = c("Any", "Negative (<0%)","Positive (>0%)","Low (<10%)","Very High (>25%)")),
+#       selectInput(inputId = "market_cap", label = "Market Cap", choices = c("Any","Micro (less than 300 mln)","Small (300 mln - 2 bln)","Mid (2-10 bln)","Large (10-200 bln)","Mega (200+ bln)")),
+#       selectInput(inputId = "payout_ratio", "Dividend Payout Ratio", choices = c("Any","<100%","<90%","<80%","<70%","<60%","<50%","<40%","<30%","<20%","<10%")),
+#       selectInput(inputId = "price_book", "Price/Book Ratio", choices = c("Any","Low (<1)","High (>5)")),
+#       selectInput(inputId = "price_equity", label = "P/E Ratio", choices = c("Any","<5","<10","<15","<20","<30","<40","<50",">50")),
+#       selectInput(inputId = "profit_margin", "Net Profit Margin", choices = c("Any","Very Negative (<-20%)","Negative (<0%)","Positive (>0%)","Very Positive (>20%)")),
+#       selectInput(inputId = "return_equity", "Return on Equity", choices = c("Any", "Very Negative","Negative","Positive","Very Positive")),
+#       selectInput(inputId = "sales_growth", label = "Past 5 years Sales Growth", choices = c("Any","Negative (<0%)","Positive (>0%)","0-10%",">25%")),
+#       selectInput(inputId = "volatility", label = "Monthly Volatility", choices = c("Any",">2%",">3%",">4%",">5%",">6%",">8%",">10%",">12%",">15%"))
+#     )
+#   }else{}
+#   
+# })
+# 
+# # Functions to display all inputs 
+# # AllInputs <- reactive({
+# #   x <- reactiveValuesToList(input)
+# #   data.frame(
+# #     names = names(x),
+# #     values = unlist(x, use.names = FALSE)
+# #   )
+# # })
+# 
+# # output$show_inputs <- renderTable({
+# #   AllInputs()
+# # })
+# 
+# # Function to reactively create dataframe to be used by get_finviz_data
+# Input_selector<-reactive({
+#   inputs_values <- c(
+#     input$debt_equity
+#     ,input$div_yield
+#     ,input$eps_growth_future
+#     ,input$eps_growth_past
+#     ,input$market_cap
+#     ,input$payout_ratio
+#     ,input$price_book
+#     ,input$price_equity
+#     ,input$profit_margin
+#     ,input$return_equity
+#     ,input$sales_growth
+#     ,input$volatility
+#     ,input$select_sector
+#   )
+#   
+#   inputs_names <- c("debt_equity" , "div_yield" , "eps_growth_future" , "eps_growth_past" , "market_cap" , "payout_ratio"
+#                     ,"price_book" , "price_equity" , "profit_margin" , "return_equity" , "sales_growth" , "volatility")
+#   idxs <- which(inputs_values != "Any")
+#   
+#   return(data.frame(inputs_values[idxs] , inputs_names[idxs]))
+# })
+# 
+# output$show_inputs <- renderTable({
+#   Input_selector()
+# })
+# 
+# 
+# # Get the URL for finviz filter based on dataframe created by user input in the shiny app 
+# generate_finViz_URL <- function(input_df){
+#   
+#   # Base URL to get financial screen 
+#   base_url <- "https://www.finviz.com/screener.ashx?v=111"
+#   
+#   # Assign initial value to variables 
+#   NULL -> market_cap -> debt_eq -> div_yield -> eps_growth_past -> eps_growth_future -> 
+#     net_margin -> div_payout -> price_book -> price_equity -> sales_growth -> sector -> volatility 
+#   
+#   # Check for Market Cap
+#   if("Market Cap" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Market Cap"),2]
+#     if(value == "Large (10-200 bln)"){
+#       market_cap <- "cap_large"
+#     }else if(value == "Mega (200+ bln)"){
+#       market_cap <- "cap_mega"
+#     }else if(value == "Mid (2-10 bln)"){
+#       market_cap <- "cap_mid"
+#     }else if(value == "Small (300 mln - 2 bln)"){
+#       market_cap <- "cap_small"
+#     }else if(value == "Micro (less than 300 mln)"){
+#       market_cap <- "cap_micro"
+#     }else if(value == "Any"){
+#       market_cap <- ""
+#     }else{}
+#   }
+#   
+#   # Check for future EPS growth 
+#   if("EPS Growth Future" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "EPS Growth Future"),2]
+#     if(value == "Any"){
+#       eps_growth_future <- ""
+#     }else if(value == "negative (<0%)"){
+#       eps_growth_future <- "fa_estltgrowth_neg"
+#     }else if(value == "positive (>0%)"){
+#       eps_growth_future <- "fa_estltgrowth_pos"
+#     }else if(value == "low (<10%)"){
+#       eps_growth_future <- "fa_estltgrowth_poslow"
+#     }else if(value == "very high (>25%)"){
+#       eps_growth_future <- "fa_estltgrowth_high"
+#     }else{}
+#   }
+#   
+#   # Check for Past EPS Growth
+#   if("EPS Growth Past" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "EPS Growth Past"),2]
+#     if(value == "Any"){
+#       eps_growth_past <- ""
+#     }else if(value == "negative (<0%)"){
+#       eps_growth_past <- "fa_eps5years_neg"
+#     }else if(value == "positive (>0%)"){
+#       eps_growth_past <- "fa_eps5years_pos"
+#     }else if(value == "low (<10%)"){
+#       eps_growth_past <- "fa_eps5years_poslow"
+#     }else if(value == "very high (>25%)"){
+#       eps_growth_past <- "fa_eps5years_high"
+#     }else{}
+#   }
+#   
+#   # Check for Volatility
+#   if("Volatility" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Volatility"),2]
+#     
+#   }
+#   
+#   # Check for P/E Ratio 
+#   if("P/E Ratio" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "P/E Ratio"),2]
+#     
+#   }
+#   
+#   # Check for P/B Ratio
+#   if("P/B Ratio" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "P/B Ratio"),2]
+#     
+#   }
+#   
+#   # D/E Ratio
+#   if("D/E Ratio" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "D/E Ratio"),2]
+#     
+#   }
+#   
+#   # Sales Growth
+#   if("Sales Growth Past" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Sales Growth Past"),2]
+#     
+#   }
+#   
+#   # Profit Margin 
+#   if("Profit Margin" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Profit Margin"),2]
+#     
+#   }
+#   
+#   # Dividend Yield
+#   if("Div Yield" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Div Yield"),2]
+#     
+#   }
+#   
+#   # Payout Ratio
+#   if("Payout Ratio" %in% input_df$selection_inputs){
+#     value <- input_df[which(input_df$selection_inputs == "Payout Ratio"),2]
+#     
+#   }
+#   
+#   # List of all of the applicable variables
+#   a <- c(market_cap, debt_eq, div_yield, eps_growth_past, eps_growth_future, 
+#          net_margin, div_payout, price_book, price_equity, sales_growth, sector, 
+#          volatility)
+#   
+#   # Insert commas between variables 
+#   vals <- insert(x = a, ats = seq(from = 2, to = length(a)), values = ",") %>% paste0(collapse = "")
+#   
+#   # Get Appropriate URL 
+#   if(length(a)>0){
+#     return_url <- paste0(base_url, "&f=", vals, "&ft=4")
+#   }else{
+#     return_url <- paste0(base_url)
+#   }
+#   
+#   # Return result
+#   return(return_url)
+# }

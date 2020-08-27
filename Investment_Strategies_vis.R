@@ -7,6 +7,8 @@
 # Methods: 
 # create graphical and tabular visualizations to demostrate different investment strategies. Focus on dividend growth investments,
 # growth investments, value investing and others
+# 
+# Author: Zachery Key
 
 library(ggplot2)
 library(tidyverse)
@@ -37,11 +39,14 @@ library(rlang)
 library(tibble)
 
 
-### ---------------------------------------- Investments Helper Functions ---------------------------------------------###
+### --------------------------------------------------- Program Helper Functions -----------------------------------------------------------###
 
-# CONSTANT SHARE PRICE, CONSTANT DIVIDEND GROWTH RATE, CONSTANT DRIP, LOW VOLATILITY, Price averaging investment function
-# given a number of years, the inflation rate, yearly income, percentage of income invested, the expected annual growth of a dividend, 
-# the expected annual yield of a dividend, the expected annual growth of the stock, and the current share price of the stock
+# @summary: Investment Growth Model Creation function 
+# 
+# @params: number of years to model for, current income, retirement income goal, inflation rate, pct of income to invest, div. growth rate,
+#          dividend yield, stock growth rate, current stock price, whether or not to adjust salary for inflation 
+# @return: a dataframe model with columns number of years, share value, dividend income, monthly investment amount, number of months, number of shares, 
+#          monthly dividend income, total value of investment, monthly income goal (accounting for inflation), net income invested, 4% of monthly goal
 
 div_growth_invest <- function(years, current_income, retire_income, inflation_rate, pct_invested, growth_div, div_yield, growth_stock, crnt_stock_price, adjust_income){
   
@@ -132,17 +137,17 @@ get_years <- function(div_model){
 
 plot_divs <- function(div_growth_model1){
   ex <- div_growth_model1[,which(colnames(div_growth_model1) %in% c("Months","four_percent_mnthly","monthly_income","monthly_income_goal"))]
-  data <- rbind(data.frame(select(ex, "Months", "monthly_income"), "div. income") %>% set_colnames(c("month","val","group")), 
-               data.frame(select(ex, "Months", "four_percent_mnthly"), "liq. income") %>% set_colnames(c("month","val","group")))
-  data$group <- factor(data$group, levels = c("div. income","liq. income"))
+  data <- rbind(data.frame(select(ex, "Months", "monthly_income"), "dividends") %>% set_colnames(c("month","val","group")), 
+               data.frame(select(ex, "Months", "four_percent_mnthly"), "capital gains") %>% set_colnames(c("month","val","group")))
+  data$group <- factor(data$group, levels = c("dividends","capital gains"))
   
   income_data <- ggplot() + 
     geom_area(data = data, aes(x = month, y = val, fill = group, color = group)) +
     geom_line(data = ex, aes(x = Months, y = monthly_income_goal, color = 'income goal'), size = 1.25) + 
     scale_x_continuous(limits = c(0, 600), breaks = c(0,120,240,360,480,600),labels = c(0,10,20,30,40,50)) + 
     scale_y_continuous(n.breaks = 10, labels = comma) + 
-    scale_color_manual(values = c("div. income" = "#7ea3c5", "liq. income" = "#51c6df", "income goal" = "red")) + 
-    scale_fill_manual(values = c("div. income" = "#7ea3c5", "liq. income" = "#51c6df"))
+    scale_color_manual(values = c("dividends" = "#7ea3c5", "capital gains" = "#51c6df", "income goal" = "red")) + 
+    scale_fill_manual(values = c("dividends" = "#7ea3c5", "capital gains" = "#51c6df"))
   
   return(
     income_data + 
@@ -205,9 +210,9 @@ filter_descriptions <- c(
 preset_filters <- data.frame(filter_presets, filter_URLs, filter_descriptions, stringsAsFactors = FALSE)
 
 # Get the number of Pages of data there is available for a particular URL
-get_no_pages <- function(tables){
+get_no_pages <- function(tables, idx){
   # Get vec of all of the page numbers 
-  page_nos <- as.character(tables[[18]]$X4)
+  page_nos <- as.character(tables[[idx]]$X4)
   # Sub out the word page and get a character vector of all of the page nos
   a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
   # Get the number of pages by splitting on / and taking second value in the list 
@@ -217,33 +222,55 @@ get_no_pages <- function(tables){
 
 # Get all of the data for a URL filter for FinViz.com 
 get_finViz_data <- function(url_val){
+  
   # Get the first table from base URL page
   tables <- read_html(url_val) %>% 
     html_table(fill = TRUE)
+  
+  # Get tables with 11 columns of particular names 
+  list_names <- lapply(tables, function(X){
+    as.character(X[1,])
+  })
+  variables <- c("No.","Ticker","Company","Sector","Industry","Country","Market Cap","P/E","Price","Change","Volume")
+  
+  # Get the list index with colnames specified by variables 
+  idx <- as.numeric(which(lapply(list_names, function(X){length(which(variables %in% X))==11})==TRUE))
+  
   # Get the number of pages to sweep through 
-  a <- get_no_pages(tables)
+  a <- get_no_pages(tables, idx-1)
+  
   # Iterate through all URLS and add tables to a list
   dat <- lapply(
     # Create URL based on web page number 
     paste0(url_val, "&r=", 2*(1:a),"1"), 
     # Read html tables, return the 17th table each time 
     function(url){
+      message(paste0("Trying: ",url))
       tables1 <- read_html(url) %>%
         html_table(fill = TRUE)
-      return(data.frame(tables1[[19]][-1,]))
+      return(data.frame(tables1[[idx]][-1,]))
     })
+  
   # Add first page to list of tables
-  dat[[length(dat)+1]] <- data.frame(tables[[19]][-1,])
+  dat[[length(dat)+1]] <- data.frame(tables[[idx]][-1,])
+  
   # Set Column names based on filters in url
-  if(grepl("v=111", url_val)){
-    dat = rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Industry","Sector","Country","Market_Cap","P/E","Share_price","Change","Volume"))
-    dat = dat[order(dat$Ticker),]
-  }else{
-    dat = rbindlist(dat)[,-1]
-  }
+  #if(grepl("v=111", url_val)){
+  dat = rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Industry","Sector","Country","Market_Cap","P/E","Share_price","Change","Volume"))
+  dat = dat[order(dat$Ticker),]
+  #}else{
+  #  dat = rbindlist(dat)[,-1]
+  #}
+  
+  # Close your socket to the web 
+  closeAllConnections()
+  
   # Combine first table with all other tables in the dats list 
   return(dat)
 }
+
+
+###----------------------------------------------------- User Interface and Server Functions ------------------------------------------------------------###
 
 
 # Create your shiny app User inferface to allow user to play around with the different variables in dividend growth investing 
@@ -360,21 +387,25 @@ ui<-fluidPage(
             tabPanel(title = "Selecting Investments",
                 column(3,
                      wellPanel(
-                       selectInput(inputId = "select_strategy", label = "Select Filter", choices = c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing"))
+                       selectInput(inputId = "select_strategy", label = "Select Filter", choices = c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing")),
+                       htmlOutput("get_descrip"),
+                       br(),
+                       actionButton(inputId = "submit_request", label = "search")
                      )
                 ), 
                 column(9,
-                     wellPanel(
-                        splitLayout(cellWidths = c("20%","50%","30%"),
-                           textInput(inputId = "filter_name", label = "Name"),
-                           textInput(inputId = "filter_URL", label = "URL"),
-                           textInput(inputId = "filter_description", label = "Description")
-                        ),
-                        div(style = "display:inline-block;", actionButton(inputId = "new_filter", label = "Add")),
-                        #div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "edit_filter", label = "Edit")),
-                        div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "delete_filter", label = "Delete"))
-                      )
-                       
+                     # wellPanel(
+                     #    splitLayout(cellWidths = c("20%","50%","30%"),
+                     #       textInput(inputId = "filter_name", label = "Name"),
+                     #       textInput(inputId = "filter_URL", label = "URL"),
+                     #       textInput(inputId = "filter_description", label = "Description")
+                     #    ),
+                     #    div(style = "display:inline-block;", actionButton(inputId = "new_filter", label = "Add")),
+                     #    #div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "edit_filter", label = "Edit")),
+                     #    div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "delete_filter", label = "Delete"))
+                     #  ),
+                     #textOutput("get_URL"),
+                    dataTableOutput("filter_table")
                 )
               ),
             tabPanel(title = "My Investments",
@@ -900,9 +931,38 @@ server <- function(input,output, session){
   ##### Investment Selection Tab #####
   ####################################
   
+  # Create dataframe with info upon submit request button being pressed
+  finViz_table <- eventReactive(input$submit_request,{
+     idx <- which(preset_filters$filter_presets==input$select_strategy)
+     my_url <- as.character(paste0(preset_filters[idx,2]))
+     return(get_finViz_data(my_url))
+  })
+  
+  # Display JS interactive table of first 5 cols of data, keep only table and col filters, make scrollable
+  output$filter_table <- renderDataTable(
+    finViz_table()[,1:5],
+    options = list(
+      dom = 'tipr',
+      scrollY = '200px',
+      scrollCollapse = TRUE
+    )
+  )
+  
+  # Display buffering text when tables are being proccessed
+  description <- eventReactive(input$select_strategy,{
+    idx <- which(preset_filters$filter_presets==input$select_strategy)
+    return(as.character(paste0(preset_filters[idx,3])))
+  })
+  
+  output$get_descrip<-renderText({
+    paste0("<h5><b>","Filter Description","</b></h5>",
+           "<p>",description(),"</p>")
+  })
+  
   
 }
 
+#### ---------------------------------------------------------------- Launch Shiny APP ------------------------------------------------- ####
 shinyApp(ui = ui, server = server)
 
 
@@ -916,9 +976,9 @@ shinyApp(ui = ui, server = server)
 
 
 # Get the number of Pages of data there is available for a particular URL
-get_no_pages <- function(tables){
+get_no_pages <- function(tables, idx){
   # Get vec of all of the page numbers 
-  page_nos <- as.character(tables[[18]]$X4)
+  page_nos <- as.character(tables[[idx]]$X4)
   # Sub out the word page and get a character vector of all of the page nos
   a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
   # Get the number of pages by splitting on / and taking second value in the list 
@@ -928,27 +988,37 @@ get_no_pages <- function(tables){
 
 # Get all of the data for a URL filter for FinViz.com 
 get_finViz_data <- function(url_val){
-   
+
   # Get the first table from base URL page
   tables <- read_html(url_val) %>% 
     html_table(fill = TRUE)
-    
-  # Get the number of pages to sweep through 
-  a <- get_no_pages(tables)
   
+  # Get tables with 11 columns of particular names 
+  list_names <- lapply(tables, function(X){
+    as.character(X[1,])
+  })
+  variables <- c("No.","Ticker","Company","Sector","Industry","Country","Market Cap","P/E","Price","Change","Volume")
+  
+  # Get the list index with colnames specified by variables 
+  idx <- as.numeric(which(lapply(list_names, function(X){length(which(variables %in% X))==11})==TRUE))
+  
+  # Get the number of pages to sweep through 
+  a <- get_no_pages(tables, idx-1)
+
   # Iterate through all URLS and add tables to a list
   dat <- lapply(
       # Create URL based on web page number 
       paste0(url_val, "&r=", 2*(1:a),"1"), 
       # Read html tables, return the 17th table each time 
       function(url){
+        message(paste0("Trying: ",url))
         tables1 <- read_html(url) %>%
           html_table(fill = TRUE)
-        return(data.frame(tables1[[19]][-1,]))
+        return(data.frame(tables1[[idx]][-1,]))
       })
   
   # Add first page to list of tables
-  dat[[length(dat)+1]] <- data.frame(tables[[19]][-1,])
+  dat[[length(dat)+1]] <- data.frame(tables[[idx]][-1,])
   
   # Set Column names based on filters in url
   if(grepl("v=111", url_val)){
@@ -962,9 +1032,16 @@ get_finViz_data <- function(url_val){
   return(dat)
 }
 
+# Check out the functions 
+c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing")
+
 blue_chips <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Blue Chip Stocks"), which(colnames(preset_filters)=="filter_URLs")])
 div_growths <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Dividend Growth Investing"), which(colnames(preset_filters)=="filter_URLs")])
 
+value_inv <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Value Investing"), which(colnames(preset_filters)=="filter_URLs")])
+penny_inv <- get_finViz_data(preset_filters[which(preset_filters$filter_presets=="Penny Stocks"), which(colnames(preset_filters)=="filter_URLs")])
+
+#preset_filters[which(preset_filters$filter_presets=="Value Investing"), which(colnames(preset_filters)=="filter_URLs")]
 
 ### EPS / NET earnings Stock Information Searcher ###
 # Purpose: to generate a viable list of all of the stocks and etfs that pay dividends. This list will then be created into a dataframe 

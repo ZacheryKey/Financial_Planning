@@ -137,6 +137,7 @@ get_years <- function(div_model){
   return(div_model[i, which(colnames(div_model)=="Years")])
 }
 
+# Plot the financial investment model with dividends using the model created by user input in function div_growth_invest
 plot_divs <- function(div_growth_model1){
   ex <- div_growth_model1[,which(colnames(div_growth_model1) %in% c("Months","four_percent_mnthly","monthly_income","monthly_income_goal"))]
   data <- rbind(data.frame(select(ex, "Months", "monthly_income"), "dividends") %>% set_colnames(c("month","val","group")), 
@@ -187,215 +188,55 @@ plot_strat <-function(data_vals){
   return(strat_plot)
 }
 
-# Create a dataframe for the preset filters to get people started using the app. This dataframe will be added onto reactively whenever someone 
-# uses the add or delete feature in the filters box
-filter_presets <- c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing","Dow Jones","S&P 500")
-filter_URLs <- c("https://www.finviz.com/screener.ashx?v=111&f=cap_largeover,fa_eps5years_pos,fa_estltgrowth_pos&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=111&f=fa_div_o3,fa_estltgrowth_pos,fa_payoutratio_u70,fa_sales5years_pos&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=111&f=fa_estltgrowth_o15,fa_netmargin_pos,fa_roe_pos,fa_sales5years_o10&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=151&f=ind_exchangetradedfund&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=151&f=cap_microunder,fa_debteq_u0.3,fa_sales5years_pos,sh_price_u10,sh_relvol_u1,ta_volatility_wo5&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=151&f=fa_debteq_u1,fa_estltgrowth_pos,fa_pb_u1,fa_sales5years_pos&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=111&f=idx_dji&ft=4"
-                ,"https://www.finviz.com/screener.ashx?v=111&f=idx_sp500&ft=4"
-                )
-filter_descriptions <- c(
-                 "Large Cap, Positive Future Growth, Positive Past Growth"
-                ,"Dividend Yield > 3%, Payout Ratio < 70%, Positive Future Growth"
-                ,">15% EPS Future Growth, positive net margin, positive return on equity"
-                ,"Exchange-Traded-Fund"
-                ,"Under 300 million market cap, <.3 debt-equity, under $10 per share, high weekly volatility, low relative shares outstanding"
-                ,"Low Price-Book ratio, debt-equity <1, positive sales growth, future positive eps growth"
-                ,"Top 30 industry performers in US"
-                ,"Top 500 market caps in US"
-                )
-preset_filters <- data.frame(filter_presets, filter_URLs, filter_descriptions, stringsAsFactors = FALSE)
-
-# Get the number of Pages of data there is available for a particular URL
-get_no_pages <- function(tables, idx){
-  # Get vec of all of the page numbers 
-  page_nos <- as.character(tables[[idx]]$X4)
-  # Sub out the word page and get a character vector of all of the page nos
-  a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
-  # Get the number of pages by splitting on / and taking second value in the list 
-  no_pages <- as.numeric(strsplit(a[2], split = "/")[[1]][2])
-  return(no_pages)
+# Method to add to the dataframe of adjusted stock prices for a specified ticker (Assume a dataframe has already been created)
+get_tick <- function(tick){
+  
+  # Get the dates we want to work with 
+  start_date <- as.Date(paste0(year(Sys.Date())-5,"-",month(Sys.Date()),"-",day(Sys.Date())))
+  end_date <- as.Date(Sys.Date())
+  
+  #Get just adjusted price, ticker, date 
+  symbol_info <- data.frame(tick, getSymbols(tick, to = end_date, from = start_date, env = NULL))[,c(1,7)] %>% set_colnames(c("Ticker","Price_Adj"))
+  
+  # Create pct change column to normalize data
+  start_val = symbol_info$Price_Adj[1]
+  symbol_info$Pct_Change<-100*((symbol_info$Price_Adj/start_val)-1)
+  
+  # Add date
+  symbol_info$Date <- row.names(symbol_info)
+  row.names(symbol_info)<-NULL
+  
+  # Update the ticker price dataframe
+  return(symbol_info)
 }
 
-# Get all of the data for a URL filter for FinViz.com 
-get_finViz_data <- function(url_val){
-  
-  # Get the first table from base URL page
-  tables <- read_html(url_val) %>% 
-    html_table(fill = TRUE)
-  
-  # Get tables with 11 columns of particular names 
-  list_names <- lapply(tables, function(X){
-    as.character(X[1,])
-  })
-  variables <- c("No.","Ticker","Company","Sector","Industry","Country","Market Cap","P/E","Price","Change","Volume")
-  
-  # Get the list index with colnames specified by variables 
-  idx <- as.numeric(which(lapply(list_names, function(X){length(which(variables %in% X))==11})==TRUE))
-  
-  # Get the number of pages to sweep through 
-  a <- get_no_pages(tables, idx-1)
-  
-  # If more than one page, iterate through all pages. Else, just use current page 
-  if(a > 1){
-    # Iterate through all URLS and add tables to a list
-    dat <- lapply(
-      # Create URL based on web page number 
-      paste0(url_val, "&r=", 2*(1:(a-1)),"1"), 
-      # Read html tables, return the 17th table each time 
-      function(url){
-        message(paste0("Trying: ",url))
-        tables1 <- read_html(url) %>%
-          html_table(fill = TRUE)
-        return(data.frame(tables1[[idx]][-1,]))
-      })
-    # Add first page to list of tables
-    dat[[length(dat)+1]] <- data.frame(tables[[idx]][-1,])
-    # Set Column names based on filters in url
-    dat <- rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Sector","Industry","Country","Market_Cap","P/E","Share_price","Change","Volume"))
-  }else{
-    dat <- data.frame(tables[[idx]][-1,])
-    # Set Column names based on filters in url
-    dat <- dat[,-1] %>% set_colnames(c("Ticker", "Company_Name","Sector","Industry","Country","Market_Cap","P/E","Share_price","Change","Volume"))
-  }
-  
-  # Order based on ticker
-  dat <- dat[order(dat$Ticker),]
-  
-  # Close your socket to the web 
-  closeAllConnections()
-  
-  # Combine first table with all other tables in the dats list 
-  return(dat)
+# Method to take in a dataframe of adjusted price over time spit out a ggplot plot with the past 5 years data for every ticker 
+plot_pct_change <- function(ticker_prices){
+  breaks_vec <- as.Date(paste0(seq(year(Sys.Date())-5, year(Sys.Date()), 1), "-", month(Sys.Date()), "-", day(Sys.Date())))
+  plot <- ggplot(data = ticker_prices) + 
+    geom_line(mapping = aes(x = Date, y = Pct_Change, group = Ticker, color = Ticker), size = 1) + 
+    scale_x_discrete(breaks = as.character(breaks_vec)) + 
+    scale_y_continuous(n.breaks = 5) +
+    ylab("Percent Change in Price") + 
+    xlab("Date") +
+    ggtitle(label = "Price change over time") + 
+      theme(
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        title = element_text(size = 16)
+        )
+  return(plot)
 }
 
-# Get Financial data from SEC filings for a specific company with finnhub api key 
-getFinnhubFinancials <- function(ticker_symbol, api_key){
-  require(RJSONIO)
-  
-  # Get data from the last 10 years from finnhub 
-  base_url <- paste0("https://finnhub.io/api/v1/stock/financials-reported?symbol=",ticker_symbol,"&freq=annual&token=")
-  a <- fromJSON(paste0(base_url,api_key))
-  
-  ### Get the data pieced together in a dataframe ###
-  inc_data <- list()
-  unique_attr <- character()
-  k = 1
-  
-  # Iterate through every year
-  for(i in 1:length(a$data)){
-    
-    # Get year and enddate info for the company filing 
-    Year <- a$data[[i]]$year
-    end_date <- a$data[[i]]$endDate
-    
-    # For each year, create vectors to hold value and labels for income statements
-    inc_value_vec <- numeric()
-    inc_label_vec <- character()
-    # Do the same for the balance sheet 
-    bs_value_vec <- numeric()
-    bs_label_vec <- character()
-    # And for cash flow 
-    cf_value_vec <- numeric()
-    cf_label_vec <- character()
-    
-    # Iterate through every piece of data in the company's income statement if it is not empty
-    if(length(a$data[[i]]$report$ic)!=0){
-      
-      for(j in 1:length(a$data[[i]]$report$ic)){
-        
-        # Get value and concept label for specified year in the income statement  
-        inc_value <- as.numeric(a$data[[i]]$report$ic[[j]][3])
-        inc_label <- as.character(a$data[[i]]$report$ic[[j]][4])
-        
-        # Add label-value pair to vectors 
-        inc_value_vec <- append(inc_value_vec, inc_value)
-        inc_label_vec <- append(inc_label_vec, inc_label)
-      }
-    }
-    
-    # Iterate through every piece of data in the balance sheet if it is not empty
-    if(length(a$data[[i]]$report$bs)!=0){
-      
-      for(j in 1:length(a$data[[i]]$report$bs)){
-        
-        # Get value and concept label for specified year in the income statement  
-        bs_value <- as.numeric(a$data[[i]]$report$bs[[j]][3])
-        bs_label <- as.character(a$data[[i]]$report$bs[[j]][4])
-        
-        # Add label-value pair to vectors 
-        bs_value_vec <- append(bs_value_vec, bs_value)
-        bs_label_vec <- append(bs_label_vec, bs_label)
-      }
-    }
-    
-    # Iterate through every piece of data in the cash flow if it is not empty
-    if(length(a$data[[i]]$report$cf)!=0){
-      
-      for(j in 1:length(a$data[[i]]$report$cf)){
-        
-        # Get value and concept label for specified year in the income statement  
-        cf_value <- as.numeric(a$data[[i]]$report$cf[[j]][3])
-        cf_label <- as.character(a$data[[i]]$report$cf[[j]][4])
-        
-        # Add label-value pair to vectors 
-        cf_value_vec <- append(cf_value_vec, cf_value)
-        cf_label_vec <- append(cf_label_vec, cf_label)
-      }
-    }
-    
-    # Concatenate balance sheets, income statements and cash flow data for a given year
-    label_vec <- c(bs_label_vec, inc_label_vec, cf_label_vec)
-    value_vec <- c(bs_value_vec, inc_value_vec, cf_value_vec)
-    
-    # Check that you have all of the data for that year. Only add to list if there is data for that year
-    if(length(na.omit(value_vec))!=0){
-      
-      # Create a dataframe including all income statement data, year and enddate
-      yrly_income_table <- data.table(value_vec) %>% transpose() %>% set_colnames(label_vec) %>% mutate(Year = Year) 
-      
-      # Add all yearly dataframes to a list and increment list posiiton 
-      inc_data[[k]] <- data.frame(yrly_income_table)
-      k = k + 1
-    }
-    
-    # Add all of the unique attributes to a vector 
-    unique_attr <- append(unique_attr, na.omit(label_vec[which(!label_vec %in% unique_attr)]))
-    
-  }
-  
-  # Combine dataframes from list, filling where necessary, select cols you want and add ticker
-  finDataList <- rbindlist(inc_data, fill = TRUE) %>% 
-    mutate(Ticker = ticker_symbol) %>%
-    relocate(c(Ticker,Year))
-  
-  return(finDataList)
-}
-
-# Get a comprehensive list of all of the stocks and their sector, industry, market cap, etc. to join for sector analysis. 
-# This will take some time.... So don't run this but once a week or month or so as there are over 7000 entries.
-updateSectors <- function(){
-  all_stocks <<- get_finViz_data("https://www.finviz.com/screener.ashx?v=111")
-  sector_update <- Sys.time()
-  save(sector_update, file = "C:/Users/Zachery Key/Desktop/Financial_Project/update.txt")
-  write.csv(all_stocks, file = "C:/Users/Zachery Key/Desktop/Financial_Project/all_stocks.csv", row.names = FALSE)
-}
-
-# Load last time data was processed, print out when it was last done. Uncomment line below to update sector info. 
-# updateSectors()
-load("C:/Users/Zachery Key/Desktop/Financial_Project/update.txt")
-all_stocks <- read.csv("C:/Users/Zachery Key/Desktop/Financial_Project/all_stocks.csv")
-print(paste0("Last Sector Update was last run on ", sector_update))
-
-# Get the actual value of the market cap in numeric form and handle missing values 
-all_stocks$Market_Cap <- ifelse(grepl("B", all_stocks$Market_Cap), as.numeric(str_replace_all(all_stocks$Market_Cap,"[^0-9.///' ]",""))*1000000000, as.character(all_stocks$Market_Cap))
-all_stocks$Market_Cap <- ifelse(grepl("M", all_stocks$Market_Cap), as.numeric(str_replace_all(all_stocks$Market_Cap,"[^0-9.///' ]",""))*1000000, as.character(all_stocks$Market_Cap))
-all_stocks$Market_Cap <- na_if(all_stocks$Market_Cap,"-") %>% as.numeric()
+# Initialize ticker_prices dataframe to be empty
+ticker_prices <- data.frame(
+  Ticker = character(),
+  Price_Adj = numeric(),
+  Pct_Change = numeric(),
+  Date = character()
+)
 
 
 ###----------------------------------------------------- User Interface and Server Functions ------------------------------------------------------------###
@@ -415,18 +256,24 @@ ui<-fluidPage(
               h4("Recomended Retirement Income should not exceed current income less yearly investment."), 
               br(),
               h4("Move sliders until retirement goals have been met, indicated by green text coloring. Income goals have been met at the intersection of the red line and the blue area."), 
-              br()
+              br(),
+              numericInput("current_income", h4("Yearly Income"), value = 50000, step = 1000, min = 0),
+              checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE),
+              br(),
+              actionButton("save_info", label = "Save")
             )         
           ),
           column(6,
             wellPanel(
-              numericInput("current_income", h4("Yearly Income"), value = 50000, step = 1000, min = 0),
+              
               sliderInput("pct_invested", h4("Percent Income to Invest"), value = 20, step = 1, min = 0, max = 100),
               sliderInput("retire_income", h4("Retirement Income Goal"), value = 40000, step = 1000, min = 0, max = 50000),
               sliderInput("retire_age", h4("Years until Retirement"), value = 30, step = 1, min = 1, max = 50),
-              checkboxInput("increase_salary", label = "Adjust Salary for Inflation", value = FALSE),
-              br(),
-              actionButton("save_info", label = "Save")
+              sliderInput("stock_growth",h4("Avg. Annual Portfolio Growth Rate"), value = 0.04, min = 0, max = .15, step = .01),
+              sliderInput("dividend_growth",h4("Avg. Annual Dividend Growth Rate"), value = 0.03, min = 0, max = .15, step = .01),
+              sliderInput("dividend_yield",h4("Avg. Annual Dividend Yield"), value = 0.03, min = 0, max = .15, step = .01)
+              
+              
             )
           )
         )
@@ -450,9 +297,9 @@ ui<-fluidPage(
                                   br()
                             ),
                             column(12,
-                                  column(4,sliderInput("stock_growth",h4("Avg. Annual Portfolio Growth Rate"), value = 0.04, min = 0, max = .15, step = .01)),
-                                  column(4,sliderInput("dividend_growth",h4("Avg. Annual Dividend Growth Rate"), value = 0.03, min = 0, max = .15, step = .01)),
-                                  column(4,sliderInput("dividend_yield",h4("Avg. Annual Dividend Yield"), value = 0.03, min = 0, max = .15, step = .01))
+                                  #column(4,sliderInput("stock_growth",h4("Avg. Annual Portfolio Growth Rate"), value = 0.04, min = 0, max = .15, step = .01)),
+                                  #column(4,sliderInput("dividend_growth",h4("Avg. Annual Dividend Growth Rate"), value = 0.03, min = 0, max = .15, step = .01)),
+                                  #column(4,sliderInput("dividend_yield",h4("Avg. Annual Dividend Yield"), value = 0.03, min = 0, max = .15, step = .01))
                              ),
                           ),
                         ),
@@ -534,7 +381,11 @@ ui<-fluidPage(
                      #    div(style = "display:inline-block; padding-left:5px;", actionButton(inputId = "delete_filter", label = "Delete"))
                      #  ),
                      #textOutput("get_URL"),
-                    withSpinner(DT::dataTableOutput("filter_table"))
+                    withSpinner(DT::dataTableOutput("filter_table")),
+                    #textOutput("tickers_out")
+                    #tableOutput("tickers_out")
+                    plotOutput("price_pct_change")
+                    #textOutput("print_idxs")
                 )
               ),
             tabPanel(title = "My Investments",
@@ -1113,6 +964,7 @@ server <- function(input,output, session){
   #     scrollCollapse = TRUE
   #   )
   # )
+  
   output$filter_table <- DT::renderDataTable(
     finViz_table()[,1:5], 
     options = list(pageLength = 15, dom = 'tipr', scrollY = '250px', scrollCollapse = TRUE),
@@ -1130,6 +982,20 @@ server <- function(input,output, session){
            "<p>",description(),"</p>")
   })
   
+  # Get input from the datatable, add ticker to the dataframe
+  get_tick_df <- reactive({
+    a <- as.character(unlist(finViz_table()[input$filter_table_rows_selected, 1]))
+    for(i in 1:length(a)){
+       ticker_prices <- rbind(ticker_prices, get_tick(a[i]))
+    }
+    return(ticker_prices)
+  })
+
+  # Render plot of percent change in stock price over time 
+  output$price_pct_change <- renderPlot({
+    plot_pct_change(get_tick_df()) + geom_hline(yintercept = 0, size = 1, linetype="dashed")
+  })
+  
   
 }
 
@@ -1138,7 +1004,259 @@ shinyApp(ui = ui, server = server)
 
 
 
+# Create a dataframe for the preset filters to get people started using the app. This dataframe will be added onto reactively whenever someone 
+# uses the add or delete feature in the filters box
+filter_presets <- c("Blue Chip Stocks","Dividend Growth Investing","Growth Investing","Index Funds/ETFs","Penny Stocks","Value Investing","Dow Jones","S&P 500")
+filter_URLs <- c("https://www.finviz.com/screener.ashx?v=111&f=cap_largeover,fa_eps5years_pos,fa_estltgrowth_pos&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=111&f=fa_div_o3,fa_estltgrowth_pos,fa_payoutratio_u70,fa_sales5years_pos&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=111&f=fa_estltgrowth_o15,fa_netmargin_pos,fa_roe_pos,fa_sales5years_o10&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=151&f=ind_exchangetradedfund&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=151&f=cap_microunder,fa_debteq_u0.3,fa_sales5years_pos,sh_price_u10,sh_relvol_u1,ta_volatility_wo5&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=151&f=fa_debteq_u1,fa_estltgrowth_pos,fa_pb_u1,fa_sales5years_pos&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=111&f=idx_dji&ft=4"
+                 ,"https://www.finviz.com/screener.ashx?v=111&f=idx_sp500&ft=4"
+)
+filter_descriptions <- c(
+  "Large Cap, Positive Future Growth, Positive Past Growth"
+  ,"Dividend Yield > 3%, Payout Ratio < 70%, Positive Future Growth"
+  ,">15% EPS Future Growth, positive net margin, positive return on equity"
+  ,"Exchange-Traded-Fund"
+  ,"Under 300 million market cap, <.3 debt-equity, under $10 per share, high weekly volatility, low relative shares outstanding"
+  ,"Low Price-Book ratio, debt-equity <1, positive sales growth, future positive eps growth"
+  ,"Top 30 industry performers in US"
+  ,"Top 500 market caps in US"
+)
+preset_filters <- data.frame(filter_presets, filter_URLs, filter_descriptions, stringsAsFactors = FALSE)
 
+# Get the number of Pages of data there is available for a particular URL
+get_no_pages <- function(tables, idx){
+  # Get vec of all of the page numbers 
+  page_nos <- as.character(tables[[idx]]$X4)
+  # Sub out the word page and get a character vector of all of the page nos
+  a <- strsplit(gsub("Page", "",  page_nos), split = " ")[[1]] 
+  # Get the number of pages by splitting on / and taking second value in the list 
+  no_pages <- as.numeric(strsplit(a[2], split = "/")[[1]][2])
+  return(no_pages)
+}
+
+# Get all of the data for a URL filter for FinViz.com 
+get_finViz_data <- function(url_val){
+  
+  # Get the first table from base URL page
+  tables <- read_html(url_val) %>% 
+    html_table(fill = TRUE)
+  
+  # Get tables with 11 columns of particular names 
+  list_names <- lapply(tables, function(X){
+    as.character(X[1,])
+  })
+  variables <- c("No.","Ticker","Company","Sector","Industry","Country","Market Cap","P/E","Price","Change","Volume")
+  
+  # Get the list index with colnames specified by variables 
+  idx <- as.numeric(which(lapply(list_names, function(X){length(which(variables %in% X))==11})==TRUE))
+  
+  # Get the number of pages to sweep through 
+  a <- get_no_pages(tables, idx-1)
+  
+  # If more than one page, iterate through all pages. Else, just use current page 
+  if(a > 1){
+    # Iterate through all URLS and add tables to a list
+    dat <- lapply(
+      # Create URL based on web page number 
+      paste0(url_val, "&r=", 2*(1:(a-1)),"1"), 
+      # Read html tables, return the 17th table each time 
+      function(url){
+        message(paste0("Trying: ",url))
+        tables1 <- read_html(url) %>%
+          html_table(fill = TRUE)
+        return(data.frame(tables1[[idx]][-1,]))
+      })
+    # Add first page to list of tables
+    dat[[length(dat)+1]] <- data.frame(tables[[idx]][-1,])
+    # Set Column names based on filters in url
+    dat <- rbindlist(dat)[,-1] %>% set_colnames(c("Ticker", "Company_Name","Sector","Industry","Country","Market_Cap","P/E","Share_price","Change","Volume"))
+  }else{
+    dat <- data.frame(tables[[idx]][-1,])
+    # Set Column names based on filters in url
+    dat <- dat[,-1] %>% set_colnames(c("Ticker", "Company_Name","Sector","Industry","Country","Market_Cap","P/E","Share_price","Change","Volume"))
+  }
+  
+  # Order based on ticker
+  dat <- dat[order(dat$Ticker),]
+  
+  # Close your socket to the web 
+  closeAllConnections()
+  
+  # Combine first table with all other tables in the dats list 
+  return(dat)
+}
+
+# Get Financial data from SEC filings for a specific company with finnhub api key 
+getFinnhubFinancials <- function(ticker_symbol, api_key){
+  require(RJSONIO)
+  
+  # Get data from the last 10 years from finnhub 
+  base_url <- paste0("https://finnhub.io/api/v1/stock/financials-reported?symbol=",ticker_symbol,"&freq=annual&token=")
+  a <- fromJSON(paste0(base_url,api_key))
+  
+  ### Get the data pieced together in a dataframe ###
+  inc_data <- list()
+  unique_attr <- character()
+  k = 1
+  
+  # Iterate through every year
+  for(i in 1:length(a$data)){
+    
+    # Get year and enddate info for the company filing 
+    Year <- a$data[[i]]$year
+    end_date <- a$data[[i]]$endDate
+    
+    # For each year, create vectors to hold value and labels for income statements
+    inc_value_vec <- numeric()
+    inc_label_vec <- character()
+    # Do the same for the balance sheet 
+    bs_value_vec <- numeric()
+    bs_label_vec <- character()
+    # And for cash flow 
+    cf_value_vec <- numeric()
+    cf_label_vec <- character()
+    
+    # Iterate through every piece of data in the company's income statement if it is not empty
+    if(length(a$data[[i]]$report$ic)!=0){
+      
+      for(j in 1:length(a$data[[i]]$report$ic)){
+        
+        # Get value and concept label for specified year in the income statement  
+        inc_value <- as.numeric(a$data[[i]]$report$ic[[j]][3])
+        inc_label <- as.character(a$data[[i]]$report$ic[[j]][4])
+        
+        # Add label-value pair to vectors 
+        inc_value_vec <- append(inc_value_vec, inc_value)
+        inc_label_vec <- append(inc_label_vec, inc_label)
+      }
+    }
+    
+    # Iterate through every piece of data in the balance sheet if it is not empty
+    if(length(a$data[[i]]$report$bs)!=0){
+      
+      for(j in 1:length(a$data[[i]]$report$bs)){
+        
+        # Get value and concept label for specified year in the income statement  
+        bs_value <- as.numeric(a$data[[i]]$report$bs[[j]][3])
+        bs_label <- as.character(a$data[[i]]$report$bs[[j]][4])
+        
+        # Add label-value pair to vectors 
+        bs_value_vec <- append(bs_value_vec, bs_value)
+        bs_label_vec <- append(bs_label_vec, bs_label)
+      }
+    }
+    
+    # Iterate through every piece of data in the cash flow if it is not empty
+    if(length(a$data[[i]]$report$cf)!=0){
+      
+      for(j in 1:length(a$data[[i]]$report$cf)){
+        
+        # Get value and concept label for specified year in the income statement  
+        cf_value <- as.numeric(a$data[[i]]$report$cf[[j]][3])
+        cf_label <- as.character(a$data[[i]]$report$cf[[j]][4])
+        
+        # Add label-value pair to vectors 
+        cf_value_vec <- append(cf_value_vec, cf_value)
+        cf_label_vec <- append(cf_label_vec, cf_label)
+      }
+    }
+    
+    # Concatenate balance sheets, income statements and cash flow data for a given year
+    label_vec <- c(bs_label_vec, inc_label_vec, cf_label_vec)
+    value_vec <- c(bs_value_vec, inc_value_vec, cf_value_vec)
+    
+    # Check that you have all of the data for that year. Only add to list if there is data for that year
+    if(length(na.omit(value_vec))!=0){
+      
+      # Create a dataframe including all income statement data, year and enddate
+      yrly_income_table <- data.table(value_vec) %>% transpose() %>% set_colnames(label_vec) %>% mutate(Year = Year) 
+      
+      # Add all yearly dataframes to a list and increment list posiiton 
+      inc_data[[k]] <- data.frame(yrly_income_table)
+      k = k + 1
+    }
+    
+    # Add all of the unique attributes to a vector 
+    unique_attr <- append(unique_attr, na.omit(label_vec[which(!label_vec %in% unique_attr)]))
+    
+  }
+  
+  # Combine dataframes from list, filling where necessary, select cols you want and add ticker
+  finDataList <- rbindlist(inc_data, fill = TRUE) %>% 
+    mutate(Ticker = ticker_symbol) %>%
+    relocate(c(Ticker,Year))
+  
+  return(finDataList)
+}
+
+# Get a comprehensive list of all of the stocks and their sector, industry, market cap, etc. to join for sector analysis. 
+# This will take some time.... So don't run this but once a week or month or so as there are over 7000 entries.
+updateSectors <- function(){
+  all_stocks <<- get_finViz_data("https://www.finviz.com/screener.ashx?v=111")
+  sector_update <- Sys.time()
+  save(sector_update, file = "C:/Users/Zachery Key/Desktop/Financial_Project/update.txt")
+  write.csv(all_stocks, file = "C:/Users/Zachery Key/Desktop/Financial_Project/all_stocks.csv", row.names = FALSE)
+}
+
+# Load last time data was processed, print out when it was last done. Uncomment line below to update sector info. 
+# updateSectors()
+load("C:/Users/Zachery Key/Desktop/Financial_Project/update.txt")
+all_stocks <- read.csv("C:/Users/Zachery Key/Desktop/Financial_Project/all_stocks.csv")
+print(paste0("Last Sector Update was last run on ", sector_update))
+
+# Get the actual value of the market cap in numeric form and handle missing values 
+all_stocks$Market_Cap <- ifelse(grepl("B", all_stocks$Market_Cap), as.numeric(str_replace_all(all_stocks$Market_Cap,"[^0-9.///' ]",""))*1000000000, as.character(all_stocks$Market_Cap))
+all_stocks$Market_Cap <- ifelse(grepl("M", all_stocks$Market_Cap), as.numeric(str_replace_all(all_stocks$Market_Cap,"[^0-9.///' ]",""))*1000000, as.character(all_stocks$Market_Cap))
+all_stocks$Market_Cap <- na_if(all_stocks$Market_Cap,"-") %>% as.numeric()
+
+
+# Initialize dataframe to add tickers to. All you need is a ticker, date and adjusted price column 
+ticker_prices <- data.frame(
+  Ticker = character(),
+  Price_Adj = numeric(),
+  Pct_Change = numeric(),
+  Date = character()
+)
+
+# Method to add to the dataframe of adjusted stock prices for a specified ticker (Assume a dataframe has already been created)
+add_tick_to_df <- function(tick){
+  
+  # Get the dates we want to work with 
+  start_date <- as.Date(paste0(year(Sys.Date())-5,"-",month(Sys.Date()),"-",day(Sys.Date())))
+  end_date <- as.Date(Sys.Date())
+  
+  #Get just adjusted price, ticker, date 
+  symbol_info <- data.frame(tick, getSymbols(tick, to = end_date, from = start_date, env = NULL))[,c(1,7)] %>% set_colnames(c("Ticker","Price_Adj"))
+  
+  # Create pct change column to normalize data
+  start_val = symbol_info$Price_Adj[1]
+  symbol_info$Pct_Change<-100*((symbol_info$Price_Adj/start_val)-1)
+  
+  # Add date
+  symbol_info$Date <- row.names(symbol_info)
+  row.names(symbol_info)<-NULL
+  
+  # Update the ticker price dataframe
+  return(rbind(ticker_prices,symbol_info))
+}
+
+# Method to take in a dataframe of adjusted price over time spit out a ggplot plot with the past 5 years data for every ticker 
+plot_pct_change <- function(ticker_prices_df){
+  plot <- ggplot(data = ticker_prices_df) + 
+          geom_line(mapping = aes(x = Date, y = Pct_Change, group = Ticker, color = Ticker)) + 
+          scale_x_discrete(breaks = function(x) x[seq(1, length(x), by = 252)]) + 
+          ylab("Percent Change in Price") + 
+          xlab("Date") +
+          ggtitle(label = "Price change over time")
+  return(plot)
+}
+
+plot_pct_change()
 # Calculate market share of a stock for a given sector or industry 
 
 # # Get dataframe of all unique sector/industry combos
@@ -1149,9 +1267,7 @@ shinyApp(ui = ui, server = server)
 # atlas <- data.frame(all_stocks$Sector, all_stocks$Industry, stringsAsFactors = FALSE) %>% unique()
 
 # Start Cracking on plotting selected Vals
-getSymbols(Symbols = c("KO"), from = as.Date("2015-01-01"), to = as.Date(Sys.Date()))
-quantmod::chart_Series(KO)
-quantmod::lineChart(KO)
+getSymbols(Symbols = c("KO"), from = as.Date(paste0(year(Sys.Date())-5,"-01-01")), to = as.Date(Sys.Date()))
 
 
 # Access data from finnhub.io. You will need to visit their website to 
